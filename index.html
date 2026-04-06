@@ -1249,45 +1249,158 @@ function deleteFoodItem(i) {
   renderFoodList(); updateMacroBars();
 }
 
+// ─── Food History (learns from logged foods) ───────────────
+function getFoodHistory() {
+  try { return JSON.parse(localStorage.getItem('ft_food_db')) || []; } catch { return []; }
+}
+function saveFoodToHistory(food) {
+  let db = getFoodHistory();
+  const existing = db.findIndex(f => f.name.toLowerCase() === food.name.toLowerCase());
+  if (existing >= 0) { db[existing].uses = (db[existing].uses || 1) + 1; db[existing] = { ...db[existing], ...food }; }
+  else db.unshift({ ...food, uses: 1 });
+  db = db.slice(0, 200);
+  localStorage.setItem('ft_food_db', JSON.stringify(db));
+}
+
+// ─── Common foods built-in (instant, no API) ───────────────
+const COMMON_FOODS = [
+  { id:'cf-1', name:'Chicken Breast (cooked)', kcal100:165, p100:31, c100:0, f100:3.6 },
+  { id:'cf-2', name:'Chicken Thigh (cooked)', kcal100:209, p100:26, c100:0, f100:10.9 },
+  { id:'cf-3', name:'Egg (whole, large)', kcal100:143, p100:13, c100:0.7, f100:9.5 },
+  { id:'cf-4', name:'Egg White', kcal100:52, p100:11, c100:0.7, f100:0.2 },
+  { id:'cf-5', name:'Oats (dry)', kcal100:389, p100:17, c100:66, f100:7 },
+  { id:'cf-6', name:'Porridge (cooked with water)', kcal100:71, p100:2.5, c100:12, f100:1.4 },
+  { id:'cf-7', name:'Brown Rice (cooked)', kcal100:111, p100:2.6, c100:23, f100:0.9 },
+  { id:'cf-8', name:'White Rice (cooked)', kcal100:130, p100:2.7, c100:28, f100:0.3 },
+  { id:'cf-9', name:'Sweet Potato (baked)', kcal100:90, p100:2, c100:21, f100:0.1 },
+  { id:'cf-10', name:'Broccoli (raw)', kcal100:34, p100:2.8, c100:7, f100:0.4 },
+  { id:'cf-11', name:'Banana', kcal100:89, p100:1.1, c100:23, f100:0.3 },
+  { id:'cf-12', name:'Apple', kcal100:52, p100:0.3, c100:14, f100:0.2 },
+  { id:'cf-13', name:'Almonds', kcal100:579, p100:21, c100:22, f100:50 },
+  { id:'cf-14', name:'Greek Yogurt (0% fat)', kcal100:59, p100:10, c100:3.6, f100:0.4 },
+  { id:'cf-15', name:'Cottage Cheese', kcal100:98, p100:11, c100:3.4, f100:4.3 },
+  { id:'cf-16', name:'Salmon (cooked)', kcal100:208, p100:20, c100:0, f100:13 },
+  { id:'cf-17', name:'Tuna (canned in water)', kcal100:116, p100:26, c100:0, f100:1 },
+  { id:'cf-18', name:'Beef Mince (lean, cooked)', kcal100:215, p100:26, c100:0, f100:12 },
+  { id:'cf-19', name:'Whey Protein (1 scoop ~30g)', kcal100:380, p100:75, c100:10, f100:5 },
+  { id:'cf-20', name:'Milk (whole)', kcal100:61, p100:3.2, c100:4.8, f100:3.3 },
+  { id:'cf-21', name:'Milk (semi-skimmed)', kcal100:47, p100:3.4, c100:5, f100:1.7 },
+  { id:'cf-22', name:'Butter', kcal100:717, p100:0.9, c100:0.1, f100:81 },
+  { id:'cf-23', name:'Olive Oil', kcal100:884, p100:0, c100:0, f100:100 },
+  { id:'cf-24', name:'Bread (white, sliced)', kcal100:265, p100:9, c100:49, f100:3.2 },
+  { id:'cf-25', name:'Bread (wholemeal, sliced)', kcal100:247, p100:11, c100:41, f100:3.4 },
+  { id:'cf-26', name:'Pasta (dry)', kcal100:371, p100:13, c100:75, f100:1.5 },
+  { id:'cf-27', name:'Pasta (cooked)', kcal100:131, p100:5, c100:25, f100:1.1 },
+  { id:'cf-28', name:'Potato (boiled)', kcal100:87, p100:1.9, c100:20, f100:0.1 },
+  { id:'cf-29', name:'Spinach (raw)', kcal100:23, p100:2.9, c100:3.6, f100:0.4 },
+  { id:'cf-30', name:'Avocado', kcal100:160, p100:2, c100:9, f100:15 },
+];
+
 function debounceSearch(val) {
   clearTimeout(searchTimer);
+  const res = document.getElementById('search-results');
   if (!val.trim()) { hideSearchResults(); return; }
-  searchTimer = setTimeout(() => searchFood(val), 400);
+  // Show instant local results immediately
+  showLocalFoodResults(val);
+  // Then fire API after debounce
+  searchTimer = setTimeout(() => searchFoodAPI(val), 600);
 }
 
-async function searchFood(query) {
+function showLocalFoodResults(query) {
+  const q = query.toLowerCase();
   const res = document.getElementById('search-results');
+  const history = getFoodHistory().filter(f => f.name.toLowerCase().includes(q)).slice(0, 5);
+  const common = COMMON_FOODS.filter(f => f.name.toLowerCase().includes(q) && !history.find(h => h.name.toLowerCase() === f.name.toLowerCase())).slice(0, 5);
+  const all = [...history.map(f => ({ ...f, source: 'history' })), ...common.map(f => ({ ...f, source: 'common' }))];
+  if (!all.length) {
+    res.style.display = 'block';
+    res.innerHTML = '<div style="padding:10px 14px;color:var(--muted);font-size:0.82rem;">Searching online…</div>';
+    return;
+  }
   res.style.display = 'block';
-  res.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.85rem;">Searching...</div>';
+  res.innerHTML = all.map(food => {
+    const badge = food.source === 'history'
+      ? `<span style="font-size:0.65rem;background:rgba(124,106,247,0.15);color:var(--accent2);border-radius:4px;padding:1px 5px;margin-left:6px;">Recent</span>` : '';
+    return `<div class="search-result-item" onclick="selectFoodFromDB(${JSON.stringify(food.id)}, ${JSON.stringify(food.name)}, ${food.kcal100}, ${food.p100}, ${food.c100}, ${food.f100})">
+      <div class="result-name">${food.name}${badge}</div>
+      <div class="result-macros">${food.kcal100} kcal · P ${food.p100}g · C ${food.c100}g · F ${food.f100}g per 100g</div>
+    </div>`;
+  }).join('');
+}
+
+async function searchFoodAPI(query) {
+  const res = document.getElementById('search-results');
+  const usdaKey = getUsdaKey();
+
+  // Try USDA first if user has a real key
+  if (usdaKey && usdaKey !== 'DEMO_KEY') {
+    try {
+      const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${usdaKey}&pageSize=8&dataType=SR%20Legacy,Foundation`;
+      const r = await fetch(url);
+      const data = await r.json();
+      if (data.foods?.length) { renderUSDAResults(data.foods, res); return; }
+    } catch {}
+  }
+
+  // Fallback: Open Food Facts (free, no key, no rate limit)
   try {
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${getUsdaKey()}&pageSize=8&dataType=SR%20Legacy,Foundation`;
+    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=1&page_size=8&sort_by=unique_scans_n&fields=product_name,nutriments,brands`;
     const r = await fetch(url);
     const data = await r.json();
-    if (!data.foods?.length) { res.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.85rem;">No results. Try adding manually.</div>'; return; }
-    res.innerHTML = data.foods.slice(0,8).map((food, i) => {
-      const n = Object.fromEntries((food.foodNutrients||[]).map(x => [x.nutrientName, x.value]));
-      const kcal = Math.round(n['Energy'] || 0);
-      const p = Math.round(n['Protein'] || 0);
-      const c = Math.round(n['Carbohydrate, by difference'] || 0);
-      const f = Math.round(n['Total lipid (fat)'] || 0);
-      return `<div class="search-result-item" onclick="selectFood(${JSON.stringify(food.fdcId)}, ${JSON.stringify(food.description)}, ${kcal}, ${p}, ${c}, ${f})">
-        <div class="result-name">${food.description}</div>
-        <div class="result-macros">${kcal} kcal · P ${p}g · C ${c}g · F ${f}g per 100g</div>
-      </div>`;
-    }).join('');
-  } catch(e) {
-    res.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.85rem;">Search unavailable. Add food manually.</div>';
-  }
+    const products = (data.products || []).filter(p => p.product_name && p.nutriments?.['energy-kcal_100g']);
+    if (products.length) { renderOFFResults(products, res, query); return; }
+  } catch {}
+
+  // If API results came back empty, local results are already showing — just quietly do nothing
 }
 
-function selectFood(fdcId, name, kcal100, p100, c100, f100) {
-  selectedFood = { fdcId, name, kcal100, p100, c100, f100 };
+function renderUSDAResults(foods, res) {
+  const items = foods.slice(0, 8).map(food => {
+    const n = Object.fromEntries((food.foodNutrients||[]).map(x => [x.nutrientName, x.value]));
+    const kcal = Math.round(n['Energy'] || 0);
+    const p = roundMacro(n['Protein'] || 0);
+    const c = roundMacro(n['Carbohydrate, by difference'] || 0);
+    const f = roundMacro(n['Total lipid (fat)'] || 0);
+    return `<div class="search-result-item" onclick="selectFoodFromDB('usda-${food.fdcId}', ${JSON.stringify(food.description)}, ${kcal}, ${p}, ${c}, ${f})">
+      <div class="result-name">${food.description} <span style="font-size:0.65rem;color:var(--muted);">USDA</span></div>
+      <div class="result-macros">${kcal} kcal · P ${p}g · C ${c}g · F ${f}g per 100g</div>
+    </div>`;
+  }).join('');
+  const existing = res.innerHTML;
+  res.innerHTML = existing + (items ? `<div style="padding:6px 14px;font-size:0.65rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">Online Results</div>` + items : '');
+}
+
+function renderOFFResults(products, res, query) {
+  const items = products.slice(0, 6).map(p => {
+    const n = p.nutriments || {};
+    const kcal = Math.round(n['energy-kcal_100g'] || 0);
+    const prot = roundMacro(n['proteins_100g'] || 0);
+    const carb = roundMacro(n['carbohydrates_100g'] || 0);
+    const fat = roundMacro(n['fat_100g'] || 0);
+    const label = p.product_name + (p.brands ? ` (${p.brands})` : '');
+    return `<div class="search-result-item" onclick="selectFoodFromDB('off-${encodeURIComponent(p.product_name)}', ${JSON.stringify(label)}, ${kcal}, ${prot}, ${carb}, ${fat})">
+      <div class="result-name">${label} <span style="font-size:0.65rem;color:var(--muted);">Open Food Facts</span></div>
+      <div class="result-macros">${kcal} kcal · P ${prot}g · C ${carb}g · F ${fat}g per 100g</div>
+    </div>`;
+  }).join('');
+  if (!items) return;
+  res.style.display = 'block';
+  res.innerHTML += `<div style="padding:6px 14px;font-size:0.65rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">Online Results</div>` + items;
+}
+
+function selectFoodFromDB(id, name, kcal100, p100, c100, f100) {
+  selectedFood = { id, name, kcal100, p100, c100, f100 };
   hideSearchResults();
   document.getElementById('food-search').value = '';
   document.getElementById('selected-food-name').textContent = name;
   document.getElementById('food-grams').value = 100;
   updateGramPreview();
   document.getElementById('add-grams-panel').style.display = 'block';
+}
+
+// Keep old selectFood as alias
+function selectFood(fdcId, name, kcal100, p100, c100, f100) {
+  selectFoodFromDB('fdc-' + fdcId, name, kcal100, p100, c100, f100);
 }
 
 function updateGramPreview() {
@@ -1305,7 +1418,7 @@ function confirmFoodAdd() {
   const factor = g / 100;
   const log = getFoodLog(foodDate);
   log.push({
-    id: 'fdc-' + selectedFood.fdcId,
+    id: (selectedFood.id || selectedFood.fdcId || 'custom') + '-' + Date.now(),
     name: selectedFood.name,
     grams: g,
     kcal: selectedFood.kcal100 * factor,
@@ -1316,8 +1429,11 @@ function confirmFoodAdd() {
     time: new Date().toTimeString().slice(0,5)
   });
   saveFoodLog(foodDate, log);
+  // Learn this food for instant future suggestions
+  saveFoodToHistory({ id: selectedFood.id || 'custom', name: selectedFood.name, kcal100: selectedFood.kcal100, p100: selectedFood.p100, c100: selectedFood.c100, f100: selectedFood.f100 });
   cancelFoodAdd();
   renderFoodList(); updateMacroBars();
+  if (foodView === 'week') renderWeekPlanner();
   showToast('Added to log');
 }
 
