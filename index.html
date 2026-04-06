@@ -896,8 +896,13 @@ let obData = {};
 // ═══════════════════════════════════════════════════════════
 // UTILS
 // ═══════════════════════════════════════════════════════════
+function localDateStr(d) {
+  // Always use LOCAL date — toISOString() returns UTC which is wrong for UTC+1 timezones
+  const dd = d || new Date();
+  return `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
+}
 function todayStr() {
-  return new Date().toISOString().split('T')[0];
+  return localDateStr(new Date());
 }
 function fmtDate(str) {
   const d = new Date(str + 'T00:00:00');
@@ -1130,7 +1135,7 @@ function renderFoodTab() {
   else {
     const d = new Date(foodDate + 'T00:00:00');
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-    if (foodDate === tomorrow.toISOString().split('T')[0]) label.textContent = 'Tomorrow';
+    if (foodDate === localDateStr(tomorrow)) label.textContent = 'Tomorrow';
     else label.textContent = fmtDate(foodDate);
   }
   const heading = document.getElementById('food-log-heading');
@@ -1142,7 +1147,7 @@ function renderFoodTab() {
 function foodNavDate(dir) {
   const d = new Date(foodDate + 'T00:00:00');
   d.setDate(d.getDate() + dir);
-  foodDate = d.toISOString().split('T')[0]; // allow future dates for planning
+  foodDate = localDateStr(d); // allow future dates for planning
   renderFoodTab();
 }
 
@@ -1180,7 +1185,7 @@ function renderWeekPlanner() {
   let html = '';
   for (let i = 0; i < 7; i++) {
     const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = localDateStr(d);
     const log = getFoodLog(dateStr);
     const tot = log.reduce((a, item) => a + (item.kcal || 0), 0);
     const pct = target ? Math.min(100, Math.round(tot / target * 100)) : 0;
@@ -1231,7 +1236,7 @@ function showCopyDayModal() {
   for (let i = 1; i <= 30; i++) {
     const d = new Date(foodDate + 'T00:00:00');
     d.setDate(d.getDate() - i);
-    const ds = d.toISOString().split('T')[0];
+    const ds = localDateStr(d);
     const log = getFoodLog(ds);
     if (log.length) options.push({ date: ds, count: log.length, kcal: Math.round(log.reduce((a, x) => a + (x.kcal||0), 0)) });
     if (options.length >= 10) break;
@@ -1605,7 +1610,7 @@ function renderWeightTab() {
   if (todayEntry) document.getElementById('weight-input').value = todayEntry.weight_kg;
 
   // Chart
-  const last30 = log.filter(e => e.date >= new Date(Date.now() - 30*864e5).toISOString().split('T')[0]).sort((a,b) => a.date.localeCompare(b.date));
+  const last30 = log.filter(e => e.date >= localDateStr(new Date(Date.now() - 30*864e5))).sort((a,b) => a.date.localeCompare(b.date));
   if (weightChart) weightChart.destroy();
   weightChart = new Chart(document.getElementById('weight-chart'), {
     type: 'line',
@@ -1624,7 +1629,7 @@ function renderWeightTab() {
   log.forEach(e => {
     const d = new Date(e.date + 'T00:00:00');
     const weekStart = new Date(d); weekStart.setDate(d.getDate() - d.getDay() + 1);
-    const key = weekStart.toISOString().split('T')[0];
+    const key = localDateStr(weekStart);
     if (!byWeek[key]) byWeek[key] = [];
     byWeek[key].push(e.weight_kg);
   });
@@ -1790,7 +1795,7 @@ function renderWorkoutTab() {
 function workoutNavDate(dir) {
   const d = new Date(workoutDate + 'T00:00:00');
   d.setDate(d.getDate() + dir);
-  workoutDate = d.toISOString().split('T')[0];
+  workoutDate = localDateStr(d);
   renderWorkoutTab();
 }
 
@@ -1801,7 +1806,7 @@ function findPreviousSession(exerciseName) {
   const today = new Date(workoutDate + 'T00:00:00');
   for (let i = 1; i <= 60; i++) {
     const d = new Date(today); d.setDate(today.getDate() - i);
-    const ds = d.toISOString().split('T')[0];
+    const ds = localDateStr(d);
     const raw = localStorage.getItem('ft_workout_' + ds);
     if (!raw) continue;
     try {
@@ -2248,7 +2253,7 @@ function exportData() {
   }
   const profile = getProfile();
   const name = (profile?.name || 'fittrack').toLowerCase().replace(/\s+/g, '-');
-  const date = new Date().toISOString().split('T')[0];
+  const date = todayStr();
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
