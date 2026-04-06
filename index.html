@@ -232,6 +232,17 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 .trend-up { color: var(--danger); }
 .trend-down { color: var(--success); }
 
+/* ── Meal pills ── */
+.meal-pills { display:flex; gap:6px; flex-wrap:wrap; }
+.meal-pill { background:var(--surface2); border:1px solid var(--border); border-radius:20px; padding:6px 12px; font-size:0.78rem; font-weight:600; color:var(--muted); cursor:pointer; font-family:inherit; transition:all 0.15s; white-space:nowrap; }
+.meal-pill.active { background:rgba(124,106,247,0.2); border-color:var(--accent2); color:var(--text); }
+
+/* ── Meal section headers in food log ── */
+.meal-section-header { display:flex; justify-content:space-between; align-items:center; padding:10px 0 6px; margin-top:4px; }
+.meal-section-title { font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); }
+.meal-section-kcal { font-size:0.72rem; color:var(--muted); font-weight:600; }
+.meal-section-divider { height:1px; background:var(--border); margin:0 0 4px; }
+
 /* ── Food view toggle ── */
 .food-view-toggle { display:flex; background:var(--surface2); border-radius:10px; padding:3px; gap:2px; }
 .fvt-btn { background:none; border:none; color:var(--muted); font-family:inherit; font-size:0.8rem; font-weight:700; padding:6px 14px; border-radius:8px; cursor:pointer; transition:all 0.15s; }
@@ -478,6 +489,15 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 
       <div class="add-grams-panel" id="add-grams-panel">
         <div style="font-weight:600;margin-bottom:10px;" id="selected-food-name">—</div>
+        <div style="margin-bottom:12px;">
+          <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:7px;">Meal</div>
+          <div class="meal-pills" id="meal-pills">
+            <button class="meal-pill" data-meal="breakfast" onclick="selectMeal('breakfast')">🌅 Breakfast</button>
+            <button class="meal-pill" data-meal="lunch" onclick="selectMeal('lunch')">☀️ Lunch</button>
+            <button class="meal-pill" data-meal="snack" onclick="selectMeal('snack')">🍎 Snack</button>
+            <button class="meal-pill" data-meal="dinner" onclick="selectMeal('dinner')">🌙 Dinner</button>
+          </div>
+        </div>
         <div class="field">
           <label>Serving size (g)</label>
           <input type="number" id="food-grams" value="100" min="1" max="2000">
@@ -1229,6 +1249,29 @@ function updateMacroBars() {
   set('mb-f', tot.fat, 'mb-ft', t.fat, 'mb-f-bar');
 }
 
+const MEALS = [
+  { key: 'breakfast', label: 'Breakfast', emoji: '🌅' },
+  { key: 'lunch',     label: 'Lunch',     emoji: '☀️' },
+  { key: 'snack',     label: 'Snack',     emoji: '🍎' },
+  { key: 'dinner',    label: 'Dinner',    emoji: '🌙' },
+];
+
+function defaultMeal() {
+  const h = new Date().getHours();
+  if (h < 11) return 'breakfast';
+  if (h < 14) return 'lunch';
+  if (h < 17) return 'snack';
+  if (h < 21) return 'dinner';
+  return 'snack';
+}
+
+let selectedMeal = defaultMeal();
+
+function selectMeal(meal) {
+  selectedMeal = meal;
+  document.querySelectorAll('.meal-pill').forEach(p => p.classList.toggle('active', p.dataset.meal === meal));
+}
+
 function renderFoodList() {
   const log = getFoodLog(foodDate);
   const list = document.getElementById('food-log-list');
@@ -1236,15 +1279,49 @@ function renderFoodList() {
     list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🍽️</div><div class="empty-state-text">Nothing logged yet.</div></div>';
     return;
   }
-  list.innerHTML = log.map((item, i) => `
-    <div class="food-item">
-      <div class="food-item-info">
-        <div class="food-item-name">${item.name}</div>
-        <div class="food-item-detail">${item.grams ? item.grams + 'g · ' : ''}P ${roundMacro(item.protein)}g · C ${roundMacro(item.carbs)}g · F ${roundMacro(item.fat)}g</div>
-      </div>
-      <div class="food-item-kcal">${Math.round(item.kcal)} kcal</div>
-      <button class="del-btn" onclick="deleteFoodItem(${i})">✕</button>
-    </div>`).join('');
+
+  // Group items by meal; items without meal go to 'other'
+  const groups = {};
+  MEALS.forEach(m => groups[m.key] = []);
+  groups['other'] = [];
+  log.forEach((item, i) => {
+    const m = item.meal && groups[item.meal] ? item.meal : 'other';
+    groups[m].push({ ...item, _idx: i });
+  });
+
+  let html = '';
+  MEALS.forEach(m => {
+    const items = groups[m.key];
+    if (!items.length) return;
+    const sectionKcal = Math.round(items.reduce((a, x) => a + (x.kcal || 0), 0));
+    html += `<div class="meal-section-header">
+      <div class="meal-section-title">${m.emoji} ${m.label}</div>
+      <div class="meal-section-kcal">${sectionKcal} kcal</div>
+    </div><div class="meal-section-divider"></div>`;
+    html += items.map(item => `
+      <div class="food-item">
+        <div class="food-item-info">
+          <div class="food-item-name">${item.name}</div>
+          <div class="food-item-detail">${item.grams ? item.grams + 'g · ' : ''}P ${roundMacro(item.protein)}g · C ${roundMacro(item.carbs)}g · F ${roundMacro(item.fat)}g</div>
+        </div>
+        <div class="food-item-kcal">${Math.round(item.kcal)} kcal</div>
+        <button class="del-btn" onclick="deleteFoodItem(${item._idx})">✕</button>
+      </div>`).join('');
+  });
+  // Uncategorised fallback
+  if (groups['other'].length) {
+    html += `<div class="meal-section-header"><div class="meal-section-title">📋 Other</div></div><div class="meal-section-divider"></div>`;
+    html += groups['other'].map(item => `
+      <div class="food-item">
+        <div class="food-item-info">
+          <div class="food-item-name">${item.name}</div>
+          <div class="food-item-detail">${item.grams ? item.grams + 'g · ' : ''}P ${roundMacro(item.protein)}g · C ${roundMacro(item.carbs)}g · F ${roundMacro(item.fat)}g</div>
+        </div>
+        <div class="food-item-kcal">${Math.round(item.kcal)} kcal</div>
+        <button class="del-btn" onclick="deleteFoodItem(${item._idx})">✕</button>
+      </div>`).join('');
+  }
+  list.innerHTML = html;
 }
 
 function deleteFoodItem(i) {
@@ -1395,6 +1472,8 @@ function selectFoodFromDB(id, name, kcal100, p100, c100, f100) {
   document.getElementById('selected-food-name').textContent = name;
   document.getElementById('food-grams').value = 100;
   updateGramPreview();
+  // Auto-select meal based on time of day
+  selectMeal(defaultMeal());
   document.getElementById('add-grams-panel').style.display = 'block';
 }
 
@@ -1420,6 +1499,7 @@ function confirmFoodAdd() {
   log.push({
     id: (selectedFood.id || selectedFood.fdcId || 'custom') + '-' + Date.now(),
     name: selectedFood.name,
+    meal: selectedMeal,
     grams: g,
     kcal: selectedFood.kcal100 * factor,
     protein: selectedFood.p100 * factor,
@@ -1446,8 +1526,19 @@ function hideSearchResults() {
   document.getElementById('search-results').style.display = 'none';
 }
 
-function showCustomFoodForm() { document.getElementById('custom-food-form').style.display = 'block'; }
 function hideCustomFoodForm() { document.getElementById('custom-food-form').style.display = 'none'; }
+
+let customMeal = defaultMeal();
+function selectCustomMeal(meal) {
+  customMeal = meal;
+  document.querySelectorAll('#custom-meal-pills .meal-pill').forEach(p => p.classList.toggle('active', p.dataset.meal === meal));
+}
+function showCustomFoodForm() {
+  customMeal = defaultMeal();
+  document.getElementById('custom-food-form').style.display = 'block';
+  // Set active pill
+  setTimeout(() => selectCustomMeal(customMeal), 0);
+}
 
 function addCustomFood() {
   const name = document.getElementById('cf-name').value.trim();
@@ -1456,6 +1547,7 @@ function addCustomFood() {
   log.push({
     id: 'custom-' + Date.now(),
     name,
+    meal: customMeal,
     kcal: +document.getElementById('cf-kcal').value || 0,
     protein: +document.getElementById('cf-protein').value || 0,
     carbs: +document.getElementById('cf-carbs').value || 0,
