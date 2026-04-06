@@ -232,6 +232,13 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 .trend-up { color: var(--danger); }
 .trend-down { color: var(--success); }
 
+/* ── PIN ── */
+.pin-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); background: none; transition: background 0.15s; }
+.pin-dot.filled { background: var(--accent); border-color: var(--accent); }
+.pin-key { width: 72px; height: 72px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: inherit; font-size: 1.4rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+.pin-key:active { background: var(--accent); }
+.pin-del { background: none; border: none; color: var(--muted); font-size: 1.3rem; }
+
 /* ── Empty state ── */
 .empty-state { text-align: center; padding: 32px 16px; color: var(--muted); }
 .empty-state-icon { font-size: 2.5rem; margin-bottom: 10px; }
@@ -558,7 +565,7 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
     <div class="card">
       <div class="field">
         <label>Session Type</label>
-        <input type="text" class="workout-type-input" id="workout-type" placeholder="e.g. Leg Day, Upper Body, Cardio">
+        <input type="text" class="workout-type-input" id="workout-type" placeholder="e.g. Leg Day, Upper Body, Cardio" onchange="saveWorkout()" oninput="autoSaveWorkoutType()">
       </div>
       <div id="exercise-list"></div>
       <div style="display:flex;gap:8px;margin-top:12px;">
@@ -649,24 +656,76 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
   </nav>
 </div>
 
+<!-- PIN Lock Screen -->
+<div id="pin-screen" style="position:fixed;inset:0;background:var(--bg);z-index:999;display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;">
+  <div style="font-size:2rem;font-weight:900;color:var(--accent2);margin-bottom:8px;">FitTrack</div>
+  <div style="color:var(--muted);font-size:0.9rem;margin-bottom:40px;" id="pin-label">Enter your PIN</div>
+  <div id="pin-dots" style="display:flex;gap:16px;margin-bottom:32px;">
+    <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,72px);gap:12px;">
+    <button class="pin-key" onclick="pinKey('1')">1</button>
+    <button class="pin-key" onclick="pinKey('2')">2</button>
+    <button class="pin-key" onclick="pinKey('3')">3</button>
+    <button class="pin-key" onclick="pinKey('4')">4</button>
+    <button class="pin-key" onclick="pinKey('5')">5</button>
+    <button class="pin-key" onclick="pinKey('6')">6</button>
+    <button class="pin-key" onclick="pinKey('7')">7</button>
+    <button class="pin-key" onclick="pinKey('8')">8</button>
+    <button class="pin-key" onclick="pinKey('9')">9</button>
+    <div></div>
+    <button class="pin-key" onclick="pinKey('0')">0</button>
+    <button class="pin-key pin-del" onclick="pinBackspace()">⌫</button>
+  </div>
+  <div id="pin-error" style="color:var(--danger);font-size:0.85rem;margin-top:20px;min-height:20px;"></div>
+</div>
+
 <!-- Settings modal -->
-<div id="settings-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:800;display:none;align-items:flex-end;justify-content:center;">
+<div id="settings-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:800;display:none;align-items:flex-end;justify-content:center;overflow-y:auto;">
   <div style="background:var(--surface);border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:480px;padding-bottom:calc(24px + env(safe-area-inset-bottom));">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
       <div style="font-size:1.2rem;font-weight:800;">⚙️ Settings</div>
       <button onclick="closeSettings()" style="background:var(--surface2);border:none;color:var(--text);border-radius:8px;padding:6px 12px;font-size:0.85rem;cursor:pointer;">Done</button>
     </div>
-    <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">API Keys — stored only on this device</div>
+
+    <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">PIN Lock</div>
     <div class="field">
-      <label>Anthropic API Key <span style="color:var(--accent2)">(AI Coach)</span></label>
-      <input type="password" id="s-anthropic" placeholder="sk-ant-api03-..." style="font-size:0.85rem;">
+      <label id="pin-setup-label">Set a 4-digit PIN to protect your data</label>
+      <input type="password" id="s-pin" placeholder="4 digits" maxlength="4" inputmode="numeric" pattern="[0-9]*" style="font-size:1.2rem;letter-spacing:0.3em;text-align:center;">
     </div>
-    <div class="field">
-      <label>USDA Food API Key <span style="color:var(--muted)">(optional — DEMO_KEY works for testing)</span></label>
-      <input type="text" id="s-usda" placeholder="DEMO_KEY or your key from fdc.nal.usda.gov" style="font-size:0.85rem;">
+    <div class="field" id="s-pin-confirm-wrap">
+      <label>Confirm PIN</label>
+      <input type="password" id="s-pin-confirm" placeholder="Repeat PIN" maxlength="4" inputmode="numeric" pattern="[0-9]*" style="font-size:1.2rem;letter-spacing:0.3em;text-align:center;">
     </div>
-    <button class="btn" onclick="saveSettings()" style="margin-top:4px;">Save Keys</button>
-    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px;">
+    <div style="display:flex;gap:8px;margin-bottom:20px;">
+      <button class="btn btn-sm" onclick="savePIN()">Save PIN</button>
+      <button class="btn btn-sm btn-ghost" id="s-pin-remove-btn" onclick="removePIN()" style="display:none;">Remove PIN</button>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:16px;">
+      <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">API Keys — stored only on this device</div>
+      <div class="field">
+        <label>Anthropic API Key <span style="color:var(--accent2)">(AI Coach)</span></label>
+        <input type="password" id="s-anthropic" placeholder="sk-ant-api03-..." style="font-size:0.85rem;">
+      </div>
+      <div class="field">
+        <label>USDA Food API Key <span style="color:var(--muted)">(optional)</span></label>
+        <input type="text" id="s-usda" placeholder="DEMO_KEY or your free key" style="font-size:0.85rem;">
+      </div>
+      <button class="btn" onclick="saveSettings()">Save Keys</button>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:16px;">
+      <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">Data Backup</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-sm btn-ghost" onclick="exportData()" style="flex:1;">⬇ Export</button>
+        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('import-file').click()" style="flex:1;">⬆ Import</button>
+      </div>
+      <input type="file" id="import-file" accept=".json" style="display:none;" onchange="importData(this)">
+      <div style="font-size:0.75rem;color:var(--muted);margin-top:8px;">Export saves all your data as a JSON file. Import restores it.</div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px;">
       <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">Profile</div>
       <button class="btn btn-ghost" onclick="resetProfile()">Reset Profile & Onboarding</button>
     </div>
@@ -731,11 +790,20 @@ function saveBodyLog(log) { localStorage.setItem('ft_body', JSON.stringify(log))
 function getWorkout(date) {
   try { return JSON.parse(localStorage.getItem('ft_workout_' + date)) || { exercises: [], type: '' }; } catch { return { exercises: [], type: '' }; }
 }
+let autoSaveTimer = null;
+function autoSaveWorkoutType() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    const wo = getWorkout(workoutDate);
+    wo.type = document.getElementById('workout-type').value;
+    localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+  }, 600);
+}
 function saveWorkout() {
   const wo = getWorkout(workoutDate);
   wo.type = document.getElementById('workout-type').value;
   localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
-  showToast('Workout saved');
+  showToast('Saved ✓');
 }
 function roundMacro(v) { return Math.round((v || 0) * 10) / 10; }
 
@@ -1524,12 +1592,81 @@ function initApp() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// PIN LOCK
+// ═══════════════════════════════════════════════════════════
+let pinBuffer = '';
+let pinMode = 'unlock'; // 'unlock' | 'setup'
+
+function hashPin(pin) {
+  // Simple hash — not crypto-grade but enough for casual privacy
+  let h = 0;
+  for (let i = 0; i < pin.length; i++) h = (Math.imul(31, h) + pin.charCodeAt(i)) | 0;
+  return h.toString(36);
+}
+
+function getStoredPin() { return localStorage.getItem('ft_pin') || null; }
+
+function checkPinOnLoad() {
+  const stored = getStoredPin();
+  if (!stored) return false; // no PIN set — proceed
+  showPinScreen('unlock');
+  return true;
+}
+
+function showPinScreen(mode) {
+  pinMode = mode;
+  pinBuffer = '';
+  document.getElementById('pin-label').textContent = mode === 'unlock' ? 'Enter your PIN' : 'Set a new PIN';
+  document.getElementById('pin-error').textContent = '';
+  updatePinDots();
+  document.getElementById('pin-screen').style.display = 'flex';
+}
+
+function updatePinDots() {
+  const dots = document.querySelectorAll('.pin-dot');
+  dots.forEach((d, i) => d.classList.toggle('filled', i < pinBuffer.length));
+}
+
+function pinKey(digit) {
+  if (pinBuffer.length >= 4) return;
+  pinBuffer += digit;
+  updatePinDots();
+  if (pinBuffer.length === 4) setTimeout(() => submitPin(), 120);
+}
+
+function pinBackspace() {
+  pinBuffer = pinBuffer.slice(0, -1);
+  updatePinDots();
+}
+
+function submitPin() {
+  if (pinMode === 'unlock') {
+    if (hashPin(pinBuffer) === getStoredPin()) {
+      document.getElementById('pin-screen').style.display = 'none';
+      initApp();
+    } else {
+      document.getElementById('pin-error').textContent = 'Incorrect PIN. Try again.';
+      pinBuffer = '';
+      updatePinDots();
+      document.getElementById('pin-screen').style.display = 'flex'; // shake effect
+      document.getElementById('pin-dots').style.animation = 'none';
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // SETTINGS
 // ═══════════════════════════════════════════════════════════
 function openSettings() {
   const s = getSettings();
   document.getElementById('s-anthropic').value = s.anthropic_key || '';
   document.getElementById('s-usda').value = s.usda_key || '';
+  // PIN state
+  const hasPIN = !!getStoredPin();
+  document.getElementById('pin-setup-label').textContent = hasPIN ? 'Change PIN (enter new 4-digit PIN)' : 'Set a 4-digit PIN to protect your data';
+  document.getElementById('s-pin-remove-btn').style.display = hasPIN ? 'inline-block' : 'none';
+  document.getElementById('s-pin').value = '';
+  document.getElementById('s-pin-confirm').value = '';
   document.getElementById('settings-modal').style.display = 'flex';
 }
 function closeSettings() {
@@ -1544,10 +1681,76 @@ function saveSettings() {
   closeSettings();
   showToast('Keys saved ✓');
 }
+function savePIN() {
+  const pin = document.getElementById('s-pin').value.trim();
+  const confirm = document.getElementById('s-pin-confirm').value.trim();
+  if (!/^\d{4}$/.test(pin)) { showToast('PIN must be exactly 4 digits'); return; }
+  if (pin !== confirm) { showToast('PINs don\'t match'); return; }
+  localStorage.setItem('ft_pin', hashPin(pin));
+  showToast('PIN saved ✓');
+  document.getElementById('s-pin').value = '';
+  document.getElementById('s-pin-confirm').value = '';
+  document.getElementById('s-pin-remove-btn').style.display = 'inline-block';
+  document.getElementById('pin-setup-label').textContent = 'Change PIN (enter new 4-digit PIN)';
+}
+function removePIN() {
+  if (!confirm('Remove PIN protection?')) return;
+  localStorage.removeItem('ft_pin');
+  showToast('PIN removed');
+  document.getElementById('s-pin-remove-btn').style.display = 'none';
+  document.getElementById('pin-setup-label').textContent = 'Set a 4-digit PIN to protect your data';
+}
 function resetProfile() {
-  if (!confirm('Reset profile and start onboarding again?')) return;
+  if (!confirm('Reset profile and start onboarding again? Your food/workout logs will be kept.')) return;
   localStorage.removeItem('ft_profile');
   location.reload();
+}
+
+// ═══════════════════════════════════════════════════════════
+// DATA EXPORT / IMPORT
+// ═══════════════════════════════════════════════════════════
+function exportData() {
+  const data = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('ft_')) {
+      try { data[key] = JSON.parse(localStorage.getItem(key)); }
+      catch { data[key] = localStorage.getItem(key); }
+    }
+  }
+  const profile = getProfile();
+  const name = (profile?.name || 'fittrack').toLowerCase().replace(/\s+/g, '-');
+  const date = new Date().toISOString().split('T')[0];
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `fittrack-${name}-${date}.json`;
+  a.click();
+  showToast('Data exported ✓');
+}
+
+function importData(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      let count = 0;
+      Object.entries(data).forEach(([key, value]) => {
+        if (key.startsWith('ft_')) {
+          localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+          count++;
+        }
+      });
+      showToast(`Imported ${count} records ✓`);
+      setTimeout(() => location.reload(), 1200);
+    } catch {
+      showToast('Import failed — invalid file');
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
 }
 
 // Bootstrap
@@ -1556,7 +1759,8 @@ const profile = getProfile();
 if (profile) {
   document.getElementById('onboarding').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
-  initApp();
+  // Check PIN before showing app
+  if (!checkPinOnLoad()) initApp();
 }
 </script>
 </body>
