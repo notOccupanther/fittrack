@@ -2286,38 +2286,68 @@ function importHealthData(input) {
 }
 
 function parseHealthAutoExport(raw) {
-  // Health Auto Export v6+ format: { data: { metrics: [...], workouts: [...] } }
-  const metrics = raw?.data?.metrics || raw?.metrics || [];
-  const result = { weight: [], bodyFat: [], muscle: [], steps: [], activeCalories: [], heartRate: [] };
+  // Health Auto Export outputs various formats depending on version
+  // Try multiple paths to find metrics array
+  let metrics = [];
+  if (Array.isArray(raw?.data?.metrics)) metrics = raw.data.metrics;
+  else if (Array.isArray(raw?.metrics)) metrics = raw.metrics;
+  else if (Array.isArray(raw?.data)) metrics = raw.data;
+  else if (Array.isArray(raw)) metrics = raw;
 
+  const result = { weight: [], bodyFat: [], muscle: [], steps: [], activeCalories: [], heartRate: [], debug: { metricsFound: metrics.length, names: [] } };
+
+  // Map ALL known Health Auto Export / HealthKit metric name variants
   const MAP = {
-    'body_mass': 'weight',
-    'body_fat_percentage': 'bodyFat',
-    'lean_body_mass': 'muscle',
-    'step_count': 'steps',
-    'active_energy': 'activeCalories',
+    // snake_case (common in HAE v6+)
+    'body_mass': 'weight', 'weight_body_mass': 'weight', 'weight': 'weight',
+    'body_fat_percentage': 'bodyFat', 'body_fat': 'bodyFat',
+    'lean_body_mass': 'muscle', 'lean_body': 'muscle',
+    'step_count': 'steps', 'steps': 'steps',
+    'active_energy': 'activeCalories', 'active_energy_burned': 'activeCalories', 'active_calories': 'activeCalories',
     'heart_rate': 'heartRate',
-    // alternative names used by some versions
-    'bodyMass': 'weight',
-    'bodyFatPercentage': 'bodyFat',
+    // camelCase
+    'bodyMass': 'weight', 'bodyWeight': 'weight',
+    'bodyFatPercentage': 'bodyFat', 'bodyFat': 'bodyFat',
     'leanBodyMass': 'muscle',
     'stepCount': 'steps',
-    'activeEnergy': 'activeCalories',
-    'heartRate': 'heartRate'
+    'activeEnergy': 'activeCalories', 'activeEnergyBurned': 'activeCalories',
+    'heartRate': 'heartRate',
+    // Apple HealthKit identifiers (HAE sometimes uses these directly)
+    'HKQuantityTypeIdentifierBodyMass': 'weight',
+    'HKQuantityTypeIdentifierBodyFatPercentage': 'bodyFat',
+    'HKQuantityTypeIdentifierLeanBodyMass': 'muscle',
+    'HKQuantityTypeIdentifierStepCount': 'steps',
+    'HKQuantityTypeIdentifierActiveEnergyBurned': 'activeCalories',
+    'HKQuantityTypeIdentifierHeartRate': 'heartRate',
+    // Display names (HAE sometimes uses human-readable names)
+    'Body Mass': 'weight', 'Weight': 'weight',
+    'Body Fat Percentage': 'bodyFat', 'Body Fat': 'bodyFat',
+    'Lean Body Mass': 'muscle',
+    'Step Count': 'steps', 'Steps': 'steps',
+    'Active Energy': 'activeCalories', 'Active Energy Burned': 'activeCalories',
+    'Heart Rate': 'heartRate',
   };
 
   metrics.forEach(metric => {
-    const key = MAP[metric.name];
+    const metricName = metric.name || metric.type || metric.identifier || '';
+    result.debug.names.push(metricName);
+    const key = MAP[metricName];
     if (!key) return;
-    (metric.data || []).forEach(entry => {
-      const dateStr = (entry.date || entry.startDate || '').slice(0, 10);
-      const val = entry.qty ?? entry.value ?? entry.Avg ?? null;
-      if (dateStr && val !== null) result[key].push({ date: dateStr, value: +val });
+    // Data can be in .data, .dataPoints, .samples, or the metric itself
+    const entries = metric.data || metric.dataPoints || metric.samples || [];
+    entries.forEach(entry => {
+      // Date can be in multiple fields, formats vary
+      const rawDate = entry.date || entry.startDate || entry.dateString || entry.timestamp || '';
+      const dateStr = rawDate.slice(0, 10); // YYYY-MM-DD
+      const val = entry.qty ?? entry.value ?? entry.Avg ?? entry.avg ?? entry.quantity ?? null;
+      if (dateStr && dateStr.length === 10 && val !== null && !isNaN(+val)) {
+        result[key].push({ date: dateStr, value: +val });
+      }
     });
   });
 
   // Deduplicate: keep latest entry per date
-  Object.keys(result).forEach(k => {
+  ['weight','bodyFat','muscle','steps','activeCalories','heartRate'].forEach(k => {
     const byDate = {};
     result[k].forEach(e => byDate[e.date] = e);
     result[k] = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
@@ -2328,50 +2358,76 @@ function parseHealthAutoExport(raw) {
 
 function applyHealthImport(result) {
   const statusEl = document.getElementById('health-sync-status');
-  let counts = { weight: 0, body: 0 };
+  let counts = { weight: 0, body: 0, updated: 0 };
 
-  // Weight log
+  // Debug: show what was found in the file
+  const found = [];
+  if (result.weight.length) found.push(`${result.weight.length} weight`);
+  if (result.bodyFat.length) found.push(`${result.bodyFat.length} body fat`);
+  if (result.muscle.length) found.push(`${result.muscle.length} muscle`);
+  if (result.steps.length) found.push(`${result.steps.length} steps`);
+  if (result.heartRate.length) found.push(`${result.heartRate.length} heart rate`);
+
+  if (!found.length) {
+    // Nothing matched — show diagnostic info
+    const names = result.debug?.names || [];
+    statusEl.innerHTML = `<span style="color:#f87171;">No recognised metrics found in file.</span><br>` +
+      `<span style="font-size:0.7rem;">Metrics in file: ${names.length ? names.slice(0,10).join(', ') : 'none detected'}</span><br>` +
+      `<span style="font-size:0.7rem;">Expected: body_mass, body_fat_percentage, lean_body_mass, step_count, active_energy, heart_rate</span>`;
+    return;
+  }
+
+  // Weight log — upsert (add new, update existing)
   if (result.weight.length) {
     let wLog = getWeightLog();
-    const existing = new Set(wLog.map(e => e.date));
+    const existingMap = Object.fromEntries(wLog.map((e, i) => [e.date, i]));
     result.weight.forEach(e => {
-      if (!existing.has(e.date)) { wLog.push({ date: e.date, weight_kg: e.value }); counts.weight++; }
+      const idx = existingMap[e.date];
+      if (idx !== undefined) { wLog[idx].weight_kg = e.value; counts.updated++; }
+      else { wLog.push({ date: e.date, weight_kg: e.value }); counts.weight++; }
     });
     wLog.sort((a, b) => a.date.localeCompare(b.date));
     saveWeightLog(wLog);
   }
 
-  // Body composition
+  // Body composition — upsert
   if (result.bodyFat.length || result.muscle.length) {
     let bLog = getBodyLog();
     const allDates = new Set([...result.bodyFat.map(e => e.date), ...result.muscle.map(e => e.date)]);
     const fatMap = Object.fromEntries(result.bodyFat.map(e => [e.date, e.value]));
     const muscleMap = Object.fromEntries(result.muscle.map(e => [e.date, e.value]));
     const weightMap = Object.fromEntries(result.weight.map(e => [e.date, e.value]));
-    const existing = new Set(bLog.map(e => e.date));
+    const existingMap = Object.fromEntries(bLog.map((e, i) => [e.date, i]));
 
     allDates.forEach(date => {
-      if (!existing.has(date)) {
-        bLog.push({
-          date,
-          weight_kg: weightMap[date] || null,
-          fat_pct: fatMap[date] ? +fatMap[date].toFixed(1) : null,
-          muscle_kg: muscleMap[date] ? +muscleMap[date].toFixed(1) : null,
-          water_pct: null
-        });
-        counts.body++;
-      }
+      const entry = {
+        date,
+        weight_kg: weightMap[date] || null,
+        fat_pct: fatMap[date] ? +fatMap[date].toFixed(1) : null,
+        muscle_kg: muscleMap[date] ? +muscleMap[date].toFixed(1) : null,
+        water_pct: null
+      };
+      const idx = existingMap[date];
+      if (idx !== undefined) { bLog[idx] = { ...bLog[idx], ...entry }; counts.updated++; }
+      else { bLog.push(entry); counts.body++; }
     });
     bLog.sort((a, b) => a.date.localeCompare(b.date));
     saveBodyLog(bLog);
   }
 
   const total = counts.weight + counts.body;
-  if (total === 0) {
-    statusEl.textContent = 'No new data found (all dates already imported).';
-  } else {
-    statusEl.textContent = `✓ Imported ${counts.weight} weight entries, ${counts.body} body comp entries.`;
-    showToast(`Health data imported ✓ (${total} entries)`);
+  const parts = [];
+  if (counts.weight) parts.push(`${counts.weight} new weight`);
+  if (counts.body) parts.push(`${counts.body} new body comp`);
+  if (counts.updated) parts.push(`${counts.updated} updated`);
+
+  statusEl.innerHTML = `✓ Found: ${found.join(', ')}<br>` +
+    (total + counts.updated > 0
+      ? `<span style="color:#4ade80;">${parts.join(', ')}</span>`
+      : `<span style="color:var(--muted);">All entries already up to date.</span>`);
+
+  if (total + counts.updated > 0) {
+    showToast(`Health data synced ✓`);
     if (currentTab === 'weight') renderWeightTab();
     if (currentTab === 'body') renderBodyTab();
     if (currentTab === 'dashboard') renderDashboard();
