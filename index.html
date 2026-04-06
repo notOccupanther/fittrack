@@ -716,6 +716,16 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
     </div>
 
     <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:16px;">
+      <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">🍎 Apple Health Sync</div>
+      <div style="font-size:0.82rem;color:var(--muted);margin-bottom:10px;line-height:1.6;">
+        Install <strong style="color:var(--text);">Health Auto Export</strong> on iPhone (free, App Store). Configure it to export: Weight, Body Fat %, Muscle Mass, Steps, Active Energy, Heart Rate. Then tap below to import.
+      </div>
+      <button class="btn btn-sm" onclick="document.getElementById('health-import-file').click()" style="background:rgba(255,59,48,0.15);color:#ff6b6b;border:1px solid rgba(255,59,48,0.2);width:100%;">⬆ Import Apple Health / Health Auto Export JSON</button>
+      <input type="file" id="health-import-file" accept=".json,.xml" style="display:none;" onchange="importHealthData(this)">
+      <div id="health-sync-status" style="font-size:0.75rem;color:var(--muted);margin-top:8px;"></div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:16px;">
       <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">Data Backup</div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-sm btn-ghost" onclick="exportData()" style="flex:1;">⬇ Export</button>
@@ -1727,6 +1737,122 @@ function exportData() {
   a.download = `fittrack-${name}-${date}.json`;
   a.click();
   showToast('Data exported ✓');
+}
+
+// ═══════════════════════════════════════════════════════════
+// APPLE HEALTH IMPORT (Health Auto Export JSON format)
+// ═══════════════════════════════════════════════════════════
+function importHealthData(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('health-sync-status');
+  statusEl.textContent = 'Reading file…';
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const raw = JSON.parse(e.target.result);
+      const result = parseHealthAutoExport(raw);
+      applyHealthImport(result);
+    } catch(err) {
+      statusEl.textContent = 'Could not parse file. Make sure it\'s Health Auto Export JSON format.';
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+function parseHealthAutoExport(raw) {
+  // Health Auto Export v6+ format: { data: { metrics: [...], workouts: [...] } }
+  const metrics = raw?.data?.metrics || raw?.metrics || [];
+  const result = { weight: [], bodyFat: [], muscle: [], steps: [], activeCalories: [], heartRate: [] };
+
+  const MAP = {
+    'body_mass': 'weight',
+    'body_fat_percentage': 'bodyFat',
+    'lean_body_mass': 'muscle',
+    'step_count': 'steps',
+    'active_energy': 'activeCalories',
+    'heart_rate': 'heartRate',
+    // alternative names used by some versions
+    'bodyMass': 'weight',
+    'bodyFatPercentage': 'bodyFat',
+    'leanBodyMass': 'muscle',
+    'stepCount': 'steps',
+    'activeEnergy': 'activeCalories',
+    'heartRate': 'heartRate'
+  };
+
+  metrics.forEach(metric => {
+    const key = MAP[metric.name];
+    if (!key) return;
+    (metric.data || []).forEach(entry => {
+      const dateStr = (entry.date || entry.startDate || '').slice(0, 10);
+      const val = entry.qty ?? entry.value ?? entry.Avg ?? null;
+      if (dateStr && val !== null) result[key].push({ date: dateStr, value: +val });
+    });
+  });
+
+  // Deduplicate: keep latest entry per date
+  Object.keys(result).forEach(k => {
+    const byDate = {};
+    result[k].forEach(e => byDate[e.date] = e);
+    result[k] = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+  });
+
+  return result;
+}
+
+function applyHealthImport(result) {
+  const statusEl = document.getElementById('health-sync-status');
+  let counts = { weight: 0, body: 0 };
+
+  // Weight log
+  if (result.weight.length) {
+    let wLog = getWeightLog();
+    const existing = new Set(wLog.map(e => e.date));
+    result.weight.forEach(e => {
+      if (!existing.has(e.date)) { wLog.push({ date: e.date, weight_kg: e.value }); counts.weight++; }
+    });
+    wLog.sort((a, b) => a.date.localeCompare(b.date));
+    saveWeightLog(wLog);
+  }
+
+  // Body composition
+  if (result.bodyFat.length || result.muscle.length) {
+    let bLog = getBodyLog();
+    const allDates = new Set([...result.bodyFat.map(e => e.date), ...result.muscle.map(e => e.date)]);
+    const fatMap = Object.fromEntries(result.bodyFat.map(e => [e.date, e.value]));
+    const muscleMap = Object.fromEntries(result.muscle.map(e => [e.date, e.value]));
+    const weightMap = Object.fromEntries(result.weight.map(e => [e.date, e.value]));
+    const existing = new Set(bLog.map(e => e.date));
+
+    allDates.forEach(date => {
+      if (!existing.has(date)) {
+        bLog.push({
+          date,
+          weight_kg: weightMap[date] || null,
+          fat_pct: fatMap[date] ? +fatMap[date].toFixed(1) : null,
+          muscle_kg: muscleMap[date] ? +muscleMap[date].toFixed(1) : null,
+          water_pct: null
+        });
+        counts.body++;
+      }
+    });
+    bLog.sort((a, b) => a.date.localeCompare(b.date));
+    saveBodyLog(bLog);
+  }
+
+  const total = counts.weight + counts.body;
+  if (total === 0) {
+    statusEl.textContent = 'No new data found (all dates already imported).';
+  } else {
+    statusEl.textContent = `✓ Imported ${counts.weight} weight entries, ${counts.body} body comp entries.`;
+    showToast(`Health data imported ✓ (${total} entries)`);
+    if (currentTab === 'weight') renderWeightTab();
+    if (currentTab === 'body') renderBodyTab();
+    if (currentTab === 'dashboard') renderDashboard();
+  }
 }
 
 function importData(input) {
