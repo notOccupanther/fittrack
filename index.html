@@ -198,16 +198,24 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 .ex-suggestion mark { background: none; color: var(--accent2); font-weight: 700; }
 
 /* ── AI CHAT ── */
-.chat-panel { background: var(--surface2); border-radius: 14px; padding: 14px; }
-.chat-panel-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent2); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
-.chat-history { min-height: 60px; max-height: 200px; overflow-y: auto; margin-bottom: 10px; }
-.chat-msg { font-size: 0.88rem; line-height: 1.6; }
-.chat-msg.user { color: var(--muted); margin-bottom: 8px; }
-.chat-msg.ai { color: var(--text); background: rgba(124,106,247,0.08); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
-.chat-input-row { display: flex; gap: 8px; }
-.chat-input { flex: 1; }
-.chat-send { background: var(--accent); border: none; color: white; border-radius: 10px; padding: 12px 16px; font-weight: 600; cursor: pointer; font-size: 0.9rem; white-space: nowrap; }
-.chat-thinking { color: var(--muted); font-style: italic; font-size: 0.85rem; }
+/* AI Coach FAB button */
+.coach-fab { position: fixed; bottom: 88px; right: 16px; width: 54px; height: 54px; border-radius: 50%; background: linear-gradient(135deg, #7c6af7, #9b6dff); border: none; color: #fff; font-size: 1.4rem; cursor: pointer; box-shadow: 0 4px 24px rgba(124,106,247,0.55); z-index: 900; display: none; align-items: center; justify-content: center; touch-action: manipulation; }
+.coach-fab.visible { display: flex; }
+/* AI Coach slide-up modal */
+.coach-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 950; align-items: flex-end; justify-content: center; }
+.coach-overlay.open { display: flex; }
+.coach-sheet { background: var(--surface); border-radius: 20px 20px 0 0; width: 100%; max-width: 600px; max-height: 82vh; display: flex; flex-direction: column; }
+.coach-sheet-header { padding: 16px 20px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.coach-sheet-title { font-size: 0.95rem; font-weight: 700; color: var(--accent2); display: flex; align-items: center; gap: 8px; }
+.coach-sheet-close { background: none; border: none; color: var(--muted); font-size: 1.5rem; cursor: pointer; padding: 2px 8px; touch-action: manipulation; line-height: 1; }
+.chat-history { flex: 1; overflow-y: auto; padding: 16px 20px; }
+.chat-msg { font-size: 0.92rem; line-height: 1.55; padding: 10px 14px; border-radius: 14px; margin-bottom: 10px; max-width: 88%; }
+.chat-msg.user { background: var(--accent2); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+.chat-msg.ai { background: var(--surface2); border-bottom-left-radius: 4px; }
+.chat-input-row { display: flex; gap: 8px; padding: 12px 20px 24px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.chat-input { flex: 1; font-size: 0.95rem; }
+.chat-send { background: var(--accent2); border: none; color: white; border-radius: 10px; padding: 0 18px; font-weight: 700; cursor: pointer; font-size: 0.9rem; touch-action: manipulation; }
+.chat-thinking { color: var(--muted); font-style: italic; font-size: 0.88rem; }
 
 /* ── PHOTOS ── */
 .photo-upload-btn {
@@ -704,18 +712,7 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
       </div>
     </div>
 
-    <div class="chat-panel">
-      <div class="chat-panel-title">
-        <span>✨</span> AI Fitness Coach
-      </div>
-      <div class="chat-history" id="chat-history">
-        <div class="chat-msg ai">Ask me anything about your workout — form tips, recovery, nutrition timing, or exercise swaps.</div>
-      </div>
-      <div class="chat-input-row">
-        <input type="text" class="chat-input" id="chat-input" placeholder="Ask for tips..." onkeydown="if(event.key==='Enter')sendChat()">
-        <button class="chat-send" onclick="sendChat()">Send</button>
-      </div>
-    </div>
+    <button class="btn" style="width:100%;background:linear-gradient(135deg,rgba(124,106,247,0.15),rgba(155,109,255,0.15));border:1px solid rgba(124,106,247,0.3);color:var(--accent2);font-weight:700;" onpointerdown="event.preventDefault();openCoach()">✨ Ask AI Coach</button>
   </div>
 
   <!-- ── Photos ── -->
@@ -1079,6 +1076,9 @@ function switchTab(tab) {
   document.getElementById('tab-' + tab).classList.add('active');
   document.getElementById('nav-' + tab).classList.add('active');
   currentTab = tab;
+  // Show coach FAB only on workout tab
+  const fab = document.getElementById('coach-fab');
+  if (fab) fab.classList.toggle('visible', tab === 'workout');
   if (tab === 'dashboard') renderDashboard();
   if (tab === 'food') { if (foodView === 'week') renderWeekPlanner(); else renderFoodTab(); }
   if (tab === 'weight') renderWeightTab();
@@ -1837,6 +1837,14 @@ document.addEventListener('click', e => {
   }
 });
 
+function openCoach() {
+  document.getElementById('coach-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('chat-input').focus(), 200);
+}
+function closeCoach() {
+  document.getElementById('coach-overlay').classList.remove('open');
+}
+
 function renderWorkoutTab() {
   document.getElementById('workout-date-label').textContent = workoutDate === todayStr() ? 'Today' : fmtDate(workoutDate);
   const wo = getWorkout(workoutDate);
@@ -2589,5 +2597,24 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 </script>
+<!-- AI Coach FAB -->
+<button class="coach-fab" id="coach-fab" onclick="openCoach()" aria-label="AI Coach">✨</button>
+
+<!-- AI Coach slide-up sheet -->
+<div class="coach-overlay" id="coach-overlay" onclick="if(event.target===this)closeCoach()">
+  <div class="coach-sheet">
+    <div class="coach-sheet-header">
+      <div class="coach-sheet-title">✨ AI Fitness Coach</div>
+      <button class="coach-sheet-close" onpointerdown="event.preventDefault();closeCoach()">×</button>
+    </div>
+    <div class="chat-history" id="chat-history">
+      <div class="chat-msg ai">Ask me anything — form tips, exercise swaps, recovery advice, or nutrition timing.</div>
+    </div>
+    <div class="chat-input-row">
+      <input type="text" class="chat-input" id="chat-input" placeholder="Ask the coach..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="chat-send" onpointerdown="event.preventDefault();sendChat()">Send</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
