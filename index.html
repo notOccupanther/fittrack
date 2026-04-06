@@ -834,6 +834,7 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
       <button class="btn btn-sm" onclick="document.getElementById('health-import-file').click()" style="background:rgba(255,59,48,0.15);color:#ff6b6b;border:1px solid rgba(255,59,48,0.2);width:100%;">⬆ Import Apple Health / Health Auto Export JSON</button>
       <input type="file" id="health-import-file" accept=".json,.xml" style="display:none;" onchange="importHealthData(this)">
       <div id="health-sync-status" style="font-size:0.75rem;color:var(--muted);margin-top:8px;"></div>
+    <div style="font-size:0.65rem;color:var(--dim);margin-top:4px;">App v2026-04-06-c</div>
     </div>
 
     <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:16px;">
@@ -2545,8 +2546,10 @@ if (profile) {
   if (!checkPinOnLoad()) initApp();
 }
 
-// PWA Service Worker
+// PWA Service Worker — unregister old versions during active development
 if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+  // Re-register clean version
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 </script>
