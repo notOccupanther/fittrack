@@ -144,7 +144,7 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
   margin-top: 4px; overflow: hidden; display: none;
 }
-.search-result-item { padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.search-result-item { padding: 14px; border-bottom: 1px solid var(--border); cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: rgba(124,106,247,0.15); }
 .search-result-item:last-child { border-bottom: none; }
 .search-result-item:active { background: var(--surface2); }
 .result-name { font-size: 0.9rem; font-weight: 600; }
@@ -533,10 +533,19 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
           </div>
         </div>
         <div class="field">
-          <label>Serving size (g)</label>
-          <input type="number" id="food-grams" value="100" min="1" max="2000">
+          <label style="font-size:0.85rem;font-weight:700;">How many grams?</label>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="number" id="food-grams" value="100" min="1" max="2000" style="font-size:1.3rem;font-weight:700;flex:1;" oninput="updateGramPreview()">
+            <span style="font-size:1rem;color:var(--muted);font-weight:600;">g</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-ghost" style="padding:4px 10px;font-size:0.75rem;" onpointerdown="event.preventDefault();document.getElementById('food-grams').value=50;updateGramPreview()">50g</button>
+            <button class="btn btn-sm btn-ghost" style="padding:4px 10px;font-size:0.75rem;" onpointerdown="event.preventDefault();document.getElementById('food-grams').value=100;updateGramPreview()">100g</button>
+            <button class="btn btn-sm btn-ghost" style="padding:4px 10px;font-size:0.75rem;" onpointerdown="event.preventDefault();document.getElementById('food-grams').value=150;updateGramPreview()">150g</button>
+            <button class="btn btn-sm btn-ghost" style="padding:4px 10px;font-size:0.75rem;" onpointerdown="event.preventDefault();document.getElementById('food-grams').value=200;updateGramPreview()">200g</button>
+          </div>
         </div>
-        <div style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;" id="gram-preview">—</div>
+        <div style="font-size:0.88rem;color:var(--accent2);font-weight:600;margin-bottom:12px;padding:8px;background:rgba(124,106,247,0.1);border-radius:8px;" id="gram-preview">—</div>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-sm btn-ghost" onclick="cancelFoodAdd()">Cancel</button>
           <button class="btn btn-sm" onclick="confirmFoodAdd()">Add to Log</button>
@@ -1481,7 +1490,7 @@ function showLocalFoodResults(query) {
   res.innerHTML = all.map(food => {
     const badge = food.source === 'history'
       ? `<span style="font-size:0.65rem;background:rgba(124,106,247,0.15);color:var(--accent2);border-radius:4px;padding:1px 5px;margin-left:6px;">Recent</span>` : '';
-    return `<div class="search-result-item" onclick="selectFoodFromDB(${JSON.stringify(food.id)}, ${JSON.stringify(food.name)}, ${food.kcal100}, ${food.p100}, ${food.c100}, ${food.f100})">
+    return `<div class="search-result-item" onpointerdown="event.preventDefault();selectFoodFromDB(${JSON.stringify(food.id)}, ${JSON.stringify(food.name)}, ${food.kcal100}, ${food.p100}, ${food.c100}, ${food.f100})">
       <div class="result-name">${food.name}${badge}</div>
       <div class="result-macros">${food.kcal100} kcal · P ${food.p100}g · C ${food.c100}g · F ${food.f100}g per 100g</div>
     </div>`;
@@ -1516,7 +1525,7 @@ function renderUSDAResults(foods, res) {
     const p = roundMacro(n['Protein'] || 0);
     const c = roundMacro(n['Carbohydrate, by difference'] || 0);
     const f = roundMacro(n['Total lipid (fat)'] || 0);
-    return `<div class="search-result-item" onclick="selectFoodFromDB('usda-${food.fdcId}', ${JSON.stringify(food.description)}, ${kcal}, ${p}, ${c}, ${f})">
+    return `<div class="search-result-item" onpointerdown="event.preventDefault();selectFoodFromDB('usda-${food.fdcId}', ${JSON.stringify(food.description)}, ${kcal}, ${p}, ${c}, ${f})">
       <div class="result-name">${food.description} <span style="font-size:0.65rem;color:var(--muted);">USDA</span></div>
       <div class="result-macros">${kcal} kcal · P ${p}g · C ${c}g · F ${f}g per 100g</div>
     </div>`;
@@ -1533,7 +1542,7 @@ function renderOFFResults(products, res, query) {
     const carb = roundMacro(n['carbohydrates_100g'] || 0);
     const fat = roundMacro(n['fat_100g'] || 0);
     const label = p.product_name + (p.brands ? ` (${p.brands})` : '');
-    return `<div class="search-result-item" onclick="selectFoodFromDB('off-${encodeURIComponent(p.product_name)}', ${JSON.stringify(label)}, ${kcal}, ${prot}, ${carb}, ${fat})">
+    return `<div class="search-result-item" onpointerdown="event.preventDefault();selectFoodFromDB('off-${encodeURIComponent(p.product_name)}', ${JSON.stringify(label)}, ${kcal}, ${prot}, ${carb}, ${fat})">
       <div class="result-name">${label} <span style="font-size:0.65rem;color:var(--muted);">Open Food Facts</span></div>
       <div class="result-macros">${kcal} kcal · P ${prot}g · C ${carb}g · F ${fat}g per 100g</div>
     </div>`;
@@ -1553,6 +1562,7 @@ function selectFoodFromDB(id, name, kcal100, p100, c100, f100) {
   // Auto-select meal based on time of day
   selectMeal(defaultMeal());
   document.getElementById('add-grams-panel').style.display = 'block';
+  setTimeout(() => document.getElementById('food-grams').focus(), 100);
 }
 
 // Keep old selectFood as alias
