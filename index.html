@@ -232,6 +232,34 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 .trend-up { color: var(--danger); }
 .trend-down { color: var(--success); }
 
+/* ── Food view toggle ── */
+.food-view-toggle { display:flex; background:var(--surface2); border-radius:10px; padding:3px; gap:2px; }
+.fvt-btn { background:none; border:none; color:var(--muted); font-family:inherit; font-size:0.8rem; font-weight:700; padding:6px 14px; border-radius:8px; cursor:pointer; transition:all 0.15s; }
+.fvt-btn.active { background:var(--surface); color:var(--text); }
+
+/* ── Week planner ── */
+.week-day-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:10px; cursor:pointer; transition:border-color 0.2s; }
+.week-day-card:active { border-color:var(--accent); }
+.week-day-card.today { border-color:var(--accent); }
+.week-day-card.future { opacity:0.85; }
+.wdc-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.wdc-day { font-weight:800; font-size:0.95rem; }
+.wdc-date { font-size:0.78rem; color:var(--muted); }
+.wdc-kcal { font-size:0.85rem; font-weight:700; color:var(--accent2); }
+.wdc-bar-track { height:4px; background:var(--surface2); border-radius:2px; margin-bottom:8px; }
+.wdc-bar-fill { height:4px; border-radius:2px; background:var(--accent); transition:width 0.4s; }
+.wdc-meals { font-size:0.78rem; color:var(--muted); line-height:1.6; }
+.wdc-empty { font-size:0.78rem; color:var(--dim); font-style:italic; }
+.wdc-plan-btn { font-size:0.75rem; color:var(--accent2); background:none; border:1px solid var(--border); border-radius:6px; padding:4px 10px; cursor:pointer; font-family:inherit; }
+
+/* ── Copy day modal ── */
+#copy-day-modal { position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:800;display:none;align-items:flex-end;justify-content:center; }
+.cdm-inner { background:var(--surface);border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:480px;padding-bottom:calc(24px + env(safe-area-inset-bottom)); }
+.copy-day-option { padding:12px 14px; border-radius:10px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border:1px solid var(--border); margin-bottom:8px; transition:border-color 0.15s; }
+.copy-day-option:active { border-color:var(--accent); }
+.copy-day-name { font-weight:600; font-size:0.9rem; }
+.copy-day-count { font-size:0.78rem; color:var(--muted); }
+
 /* ── PIN ── */
 .pin-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); background: none; transition: background 0.15s; }
 .pin-dot.filled { background: var(--accent); border-color: var(--accent); }
@@ -402,87 +430,107 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 
   <!-- ── Food ── -->
   <div class="tab-panel" id="tab-food">
-    <div class="page-header">
-      <div class="page-title">Food Log</div>
-    </div>
-
-    <div class="date-nav">
-      <button onclick="foodNavDate(-1)">‹</button>
-      <div class="date-nav-label" id="food-date-label">Today</div>
-      <button onclick="foodNavDate(1)">›</button>
-    </div>
-
-    <div class="macro-bar card" style="padding:14px;">
-      <div class="macro-bar-item">
-        <div class="macro-bar-label">Kcal</div>
-        <div class="macro-bar-val"><span id="mb-kcal">0</span> / <span id="mb-kcal-t">—</span></div>
-        <div class="macro-bar-track"><div class="macro-bar-fill" id="mb-kcal-bar" style="background:#7c6af7;width:0%"></div></div>
-      </div>
-    </div>
-    <div class="macro-bar" style="display:flex;gap:8px;margin-bottom:16px;">
-      <div class="macro-bar-item card" style="padding:10px;margin-bottom:0;">
-        <div class="macro-bar-label">Protein</div>
-        <div style="font-size:0.82rem;font-weight:700;"><span id="mb-p">0</span>g / <span id="mb-pt">—</span>g</div>
-        <div class="macro-bar-track"><div class="macro-bar-fill" id="mb-p-bar" style="background:#7c6af7;width:0%"></div></div>
-      </div>
-      <div class="macro-bar-item card" style="padding:10px;margin-bottom:0;">
-        <div class="macro-bar-label">Carbs</div>
-        <div style="font-size:0.82rem;font-weight:700;"><span id="mb-c">0</span>g / <span id="mb-ct">—</span>g</div>
-        <div class="macro-bar-track"><div class="macro-bar-fill" id="mb-c-bar" style="background:#f59e0b;width:0%"></div></div>
-      </div>
-      <div class="macro-bar-item card" style="padding:10px;margin-bottom:0;">
-        <div class="macro-bar-label">Fat</div>
-        <div style="font-size:0.82rem;font-weight:700;"><span id="mb-f">0</span>g / <span id="mb-ft">—</span>g</div>
-        <div class="macro-bar-track"><div class="macro-bar-fill" id="mb-f-bar" style="background:#4ade80;width:0%"></div></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div class="page-title">Food</div>
+      <div class="food-view-toggle">
+        <button class="fvt-btn active" id="fvt-day" onclick="setFoodView('day')">Day</button>
+        <button class="fvt-btn" id="fvt-week" onclick="setFoodView('week')">Week</button>
       </div>
     </div>
 
-    <div class="search-wrap">
-      <input type="text" id="food-search" placeholder="🔍 Search food (chicken breast, oats...)" oninput="debounceSearch(this.value)">
-      <div class="search-results" id="search-results"></div>
-    </div>
+    <!-- ── Day view ── -->
+    <div id="food-day-view">
+      <div class="date-nav">
+        <button onclick="foodNavDate(-1)">‹</button>
+        <div class="date-nav-label" id="food-date-label">Today</div>
+        <button onclick="foodNavDate(1)">›</button>
+      </div>
 
-    <div class="add-grams-panel" id="add-grams-panel">
-      <div style="font-weight:600;margin-bottom:10px;" id="selected-food-name">—</div>
-      <div class="field">
-        <label>Serving size (g)</label>
-        <input type="number" id="food-grams" value="100" min="1" max="2000">
+      <div class="macro-bar card" style="padding:14px;">
+        <div class="macro-bar-item">
+          <div class="macro-bar-label">Kcal</div>
+          <div class="macro-bar-val"><span id="mb-kcal">0</span> / <span id="mb-kcal-t">—</span></div>
+          <div class="macro-bar-track"><div class="macro-bar-fill" id="mb-kcal-bar" style="background:#7c6af7;width:0%"></div></div>
+        </div>
       </div>
-      <div style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;" id="gram-preview">—</div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-sm btn-ghost" onclick="cancelFoodAdd()">Cancel</button>
-        <button class="btn btn-sm" onclick="confirmFoodAdd()">Add to Log</button>
+      <div class="macro-bar" style="display:flex;gap:8px;margin-bottom:16px;">
+        <div class="macro-bar-item card" style="padding:10px;margin-bottom:0;">
+          <div class="macro-bar-label">Protein</div>
+          <div style="font-size:0.82rem;font-weight:700;"><span id="mb-p">0</span>g / <span id="mb-pt">—</span>g</div>
+          <div class="macro-bar-track"><div class="macro-bar-fill" id="mb-p-bar" style="background:#7c6af7;width:0%"></div></div>
+        </div>
+        <div class="macro-bar-item card" style="padding:10px;margin-bottom:0;">
+          <div class="macro-bar-label">Carbs</div>
+          <div style="font-size:0.82rem;font-weight:700;"><span id="mb-c">0</span>g / <span id="mb-ct">—</span>g</div>
+          <div class="macro-bar-track"><div class="macro-bar-fill" id="mb-c-bar" style="background:#f59e0b;width:0%"></div></div>
+        </div>
+        <div class="macro-bar-item card" style="padding:10px;margin-bottom:0;">
+          <div class="macro-bar-label">Fat</div>
+          <div style="font-size:0.82rem;font-weight:700;"><span id="mb-f">0</span>g / <span id="mb-ft">—</span>g</div>
+          <div class="macro-bar-track"><div class="macro-bar-fill" id="mb-f-bar" style="background:#4ade80;width:0%"></div></div>
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <div class="card-title" style="margin-bottom:0;">Today's Log</div>
-        <button class="btn btn-sm btn-ghost" onclick="showCustomFoodForm()">+ Custom</button>
+      <div class="search-wrap">
+        <input type="text" id="food-search" placeholder="🔍 Search food (chicken breast, oats...)" oninput="debounceSearch(this.value)">
+        <div class="search-results" id="search-results"></div>
       </div>
-      <div id="food-log-list">
-        <div class="empty-state">
-          <div class="empty-state-icon">🍽️</div>
-          <div class="empty-state-text">Nothing logged yet. Search above or add a custom food.</div>
+
+      <div class="add-grams-panel" id="add-grams-panel">
+        <div style="font-weight:600;margin-bottom:10px;" id="selected-food-name">—</div>
+        <div class="field">
+          <label>Serving size (g)</label>
+          <input type="number" id="food-grams" value="100" min="1" max="2000">
+        </div>
+        <div style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;" id="gram-preview">—</div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-ghost" onclick="cancelFoodAdd()">Cancel</button>
+          <button class="btn btn-sm" onclick="confirmFoodAdd()">Add to Log</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div class="card-title" style="margin-bottom:0;" id="food-log-heading">Today's Log</div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-ghost" id="copy-day-btn" onclick="showCopyDayModal()" title="Copy meals from another day">⎘ Copy</button>
+            <button class="btn btn-sm btn-ghost" onclick="showCustomFoodForm()">+ Custom</button>
+          </div>
+        </div>
+        <div id="food-log-list">
+          <div class="empty-state">
+            <div class="empty-state-icon">🍽️</div>
+            <div class="empty-state-text">Nothing logged yet. Search above or add a custom food.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="custom-food-form" style="display:none;">
+        <div class="card-title">Custom Food</div>
+        <div class="field"><label>Name</label><input type="text" id="cf-name" placeholder="e.g. Homemade stew"></div>
+        <div style="display:flex;gap:8px;">
+          <div class="field"><label>Kcal</label><input type="number" id="cf-kcal" placeholder="300"></div>
+          <div class="field"><label>Protein (g)</label><input type="number" id="cf-protein" placeholder="20"></div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <div class="field"><label>Carbs (g)</label><input type="number" id="cf-carbs" placeholder="30"></div>
+          <div class="field"><label>Fat (g)</label><input type="number" id="cf-fat" placeholder="10"></div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-ghost" onclick="hideCustomFoodForm()">Cancel</button>
+          <button class="btn btn-sm" onclick="addCustomFood()">Add</button>
         </div>
       </div>
     </div>
 
-    <div class="card" id="custom-food-form" style="display:none;">
-      <div class="card-title">Custom Food</div>
-      <div class="field"><label>Name</label><input type="text" id="cf-name" placeholder="e.g. Homemade stew"></div>
-      <div style="display:flex;gap:8px;">
-        <div class="field"><label>Kcal</label><input type="number" id="cf-kcal" placeholder="300"></div>
-        <div class="field"><label>Protein (g)</label><input type="number" id="cf-protein" placeholder="20"></div>
+    <!-- ── Week planner view ── -->
+    <div id="food-week-view" style="display:none;">
+      <div class="date-nav">
+        <button onclick="weekPlanNav(-1)">‹</button>
+        <div class="date-nav-label" id="week-plan-label">This Week</div>
+        <button onclick="weekPlanNav(1)">›</button>
       </div>
-      <div style="display:flex;gap:8px;">
-        <div class="field"><label>Carbs (g)</label><input type="number" id="cf-carbs" placeholder="30"></div>
-        <div class="field"><label>Fat (g)</label><input type="number" id="cf-fat" placeholder="10"></div>
-      </div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-sm btn-ghost" onclick="hideCustomFoodForm()">Cancel</button>
-        <button class="btn btn-sm" onclick="addCustomFood()">Add</button>
-      </div>
+      <div id="week-plan-grid"></div>
     </div>
   </div>
 
@@ -742,6 +790,18 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
   </div>
 </div>
 
+<!-- Copy day modal -->
+<div id="copy-day-modal">
+  <div class="cdm-inner">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div style="font-size:1.1rem;font-weight:800;">Copy meals from…</div>
+      <button onclick="closeCopyDayModal()" style="background:var(--surface2);border:none;color:var(--text);border-radius:8px;padding:6px 12px;font-size:0.85rem;cursor:pointer;">Cancel</button>
+    </div>
+    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:14px;">Copies all food items from that day into <span id="copy-target-label" style="color:var(--text);font-weight:600;"></span></div>
+    <div id="copy-day-options"></div>
+  </div>
+</div>
+
 <!-- Photo fullscreen modal -->
 <div id="photo-modal">
   <button class="close-modal" onclick="closePhotoModal()">✕</button>
@@ -763,6 +823,8 @@ function getAnthropicKey() { return getSettings().anthropic_key || ''; }
 // ═══════════════════════════════════════════════════════════
 let currentTab = 'dashboard';
 let foodDate = todayStr();
+let foodView = 'day'; // 'day' | 'week'
+let weekPlanOffset = 0; // weeks offset from current
 let workoutDate = todayStr();
 let selectedFood = null;
 let donutChart = null;
@@ -918,7 +980,7 @@ function switchTab(tab) {
   document.getElementById('nav-' + tab).classList.add('active');
   currentTab = tab;
   if (tab === 'dashboard') renderDashboard();
-  if (tab === 'food') renderFoodTab();
+  if (tab === 'food') { if (foodView === 'week') renderWeekPlanner(); else renderFoodTab(); }
   if (tab === 'weight') renderWeightTab();
   if (tab === 'body') renderBodyTab();
   if (tab === 'workout') renderWorkoutTab();
@@ -993,8 +1055,26 @@ function renderDashboard() {
 // ═══════════════════════════════════════════════════════════
 let searchTimer = null;
 
+function setFoodView(view) {
+  foodView = view;
+  document.getElementById('fvt-day').classList.toggle('active', view === 'day');
+  document.getElementById('fvt-week').classList.toggle('active', view === 'week');
+  document.getElementById('food-day-view').style.display = view === 'day' ? 'block' : 'none';
+  document.getElementById('food-week-view').style.display = view === 'week' ? 'block' : 'none';
+  if (view === 'week') renderWeekPlanner();
+}
+
 function renderFoodTab() {
-  document.getElementById('food-date-label').textContent = foodDate === todayStr() ? 'Today' : fmtDate(foodDate);
+  const label = document.getElementById('food-date-label');
+  if (foodDate === todayStr()) label.textContent = 'Today';
+  else {
+    const d = new Date(foodDate + 'T00:00:00');
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    if (foodDate === tomorrow.toISOString().split('T')[0]) label.textContent = 'Tomorrow';
+    else label.textContent = fmtDate(foodDate);
+  }
+  const heading = document.getElementById('food-log-heading');
+  if (heading) heading.textContent = foodDate === todayStr() ? "Today's Log" : fmtDate(foodDate) + ' — Log';
   updateMacroBars();
   renderFoodList();
 }
@@ -1002,9 +1082,126 @@ function renderFoodTab() {
 function foodNavDate(dir) {
   const d = new Date(foodDate + 'T00:00:00');
   d.setDate(d.getDate() + dir);
-  if (d > new Date()) return; // no future dates
-  foodDate = d.toISOString().split('T')[0];
+  foodDate = d.toISOString().split('T')[0]; // allow future dates for planning
   renderFoodTab();
+}
+
+// ─── Week Planner ─────────────────────────────────────────
+function getWeekStart(offsetWeeks) {
+  const d = new Date();
+  const day = d.getDay(); // 0=Sun
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1) + offsetWeeks * 7);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+function weekPlanNav(dir) {
+  weekPlanOffset += dir;
+  renderWeekPlanner();
+}
+
+function renderWeekPlanner() {
+  const profile = getProfile();
+  const target = profile?.targets?.kcal || 0;
+  const weekStart = getWeekStart(weekPlanOffset);
+  const today = todayStr();
+
+  const label = document.getElementById('week-plan-label');
+  if (weekPlanOffset === 0) label.textContent = 'This Week';
+  else if (weekPlanOffset === 1) label.textContent = 'Next Week';
+  else if (weekPlanOffset === -1) label.textContent = 'Last Week';
+  else {
+    const end = new Date(weekStart); end.setDate(end.getDate() + 6);
+    label.textContent = weekStart.toLocaleDateString('en-IE', { day:'numeric', month:'short' }) + ' – ' + end.toLocaleDateString('en-IE', { day:'numeric', month:'short' });
+  }
+
+  const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+    const dateStr = d.toISOString().split('T')[0];
+    const log = getFoodLog(dateStr);
+    const tot = log.reduce((a, item) => a + (item.kcal || 0), 0);
+    const pct = target ? Math.min(100, Math.round(tot / target * 100)) : 0;
+    const isToday = dateStr === today;
+    const isFuture = dateStr > today;
+    const dateLabel = d.toLocaleDateString('en-IE', { day:'numeric', month:'short' });
+
+    let mealsHtml = '';
+    if (log.length) {
+      const names = log.slice(0, 3).map(i => i.name).join(', ');
+      const more = log.length > 3 ? ` +${log.length - 3} more` : '';
+      mealsHtml = `<div class="wdc-meals">${names}${more}</div>`;
+    } else {
+      mealsHtml = `<div class="wdc-empty">${isFuture ? 'Plan your meals...' : 'Nothing logged'}</div>`;
+    }
+
+    const barColor = pct > 100 ? '#f87171' : pct >= 80 ? '#4ade80' : '#7c6af7';
+    html += `
+      <div class="week-day-card ${isToday ? 'today' : ''} ${isFuture ? 'future' : ''}" onclick="jumpToDay('${dateStr}')">
+        <div class="wdc-header">
+          <div>
+            <div class="wdc-day">${DAYS[i]}${isToday ? ' · Today' : ''}</div>
+            <div class="wdc-date">${dateLabel}</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="wdc-kcal">${tot ? Math.round(tot) + ' kcal' : '—'}</div>
+            ${target ? `<div style="font-size:0.7rem;color:var(--muted);">${pct}% of target</div>` : ''}
+          </div>
+        </div>
+        <div class="wdc-bar-track"><div class="wdc-bar-fill" style="width:${pct}%;background:${barColor};"></div></div>
+        ${mealsHtml}
+      </div>`;
+  }
+  document.getElementById('week-plan-grid').innerHTML = html;
+}
+
+function jumpToDay(dateStr) {
+  foodDate = dateStr;
+  setFoodView('day');
+  renderFoodTab();
+}
+
+// ─── Copy Day ─────────────────────────────────────────────
+function showCopyDayModal() {
+  document.getElementById('copy-target-label').textContent = foodDate === todayStr() ? 'today' : fmtDate(foodDate);
+  // Find last 14 days with food logged (excluding current day)
+  const options = [];
+  for (let i = 1; i <= 30; i++) {
+    const d = new Date(foodDate + 'T00:00:00');
+    d.setDate(d.getDate() - i);
+    const ds = d.toISOString().split('T')[0];
+    const log = getFoodLog(ds);
+    if (log.length) options.push({ date: ds, count: log.length, kcal: Math.round(log.reduce((a, x) => a + (x.kcal||0), 0)) });
+    if (options.length >= 10) break;
+  }
+  if (!options.length) {
+    alert('No previous days with food logged yet.');
+    return;
+  }
+  document.getElementById('copy-day-options').innerHTML = options.map(o => `
+    <div class="copy-day-option" onclick="copyDayMeals('${o.date}')">
+      <div>
+        <div class="copy-day-name">${fmtDate(o.date)}</div>
+        <div class="copy-day-count">${o.count} items · ${o.kcal} kcal</div>
+      </div>
+      <button class="btn btn-sm" style="pointer-events:none;">Copy</button>
+    </div>`).join('');
+  document.getElementById('copy-day-modal').style.display = 'flex';
+}
+
+function closeCopyDayModal() { document.getElementById('copy-day-modal').style.display = 'none'; }
+
+function copyDayMeals(fromDate) {
+  const source = getFoodLog(fromDate);
+  const current = getFoodLog(foodDate);
+  const merged = [...current, ...source.map(i => ({ ...i, id: i.id + '-copy-' + Date.now() }))];
+  saveFoodLog(foodDate, merged);
+  closeCopyDayModal();
+  renderFoodList(); updateMacroBars();
+  if (foodView === 'week') renderWeekPlanner();
+  showToast(`Copied ${source.length} items from ${fmtDate(fromDate)}`);
 }
 
 function updateMacroBars() {
