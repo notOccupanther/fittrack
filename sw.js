@@ -1,4 +1,4 @@
-const CACHE = 'fittrack-v1';
+const CACHE = 'fittrack-v2';
 const ASSETS = [
   '/fittrack/',
   '/fittrack/index.html',
@@ -18,10 +18,22 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Network-first for API calls, cache-first for assets
+  // Skip API calls entirely — always network
   if (e.request.url.includes('api.nal.usda.gov') || e.request.url.includes('openfoodfacts.org') || e.request.url.includes('api.anthropic.com')) {
-    return; // let these go to network normally
+    return;
   }
+  // Network-first for HTML (so updates are instant), cache-fallback for offline
+  if (e.request.mode === 'navigate' || e.request.url.endsWith('.html') || e.request.url.endsWith('/')) {
+    e.respondWith(
+      fetch(e.request).then(resp => {
+        const clone = resp.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+        return resp;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+  // Cache-first for static assets (fonts, chart.js, icons)
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request).then(resp => {
       const clone = resp.clone();
