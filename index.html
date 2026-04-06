@@ -447,6 +447,24 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
       </div>
     </div>
 
+    <div class="card" id="dash-activity-card" style="display:none;">
+      <div class="card-title">Today's Activity</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div class="stat-card" style="flex:1;min-width:80px;">
+          <div class="stat-val" id="dash-steps">—</div>
+          <div class="stat-lbl">Steps</div>
+        </div>
+        <div class="stat-card" style="flex:1;min-width:80px;">
+          <div class="stat-val" id="dash-active-cal">—</div>
+          <div class="stat-lbl">Active kcal</div>
+        </div>
+        <div class="stat-card" style="flex:1;min-width:80px;">
+          <div class="stat-val" id="dash-hr">—</div>
+          <div class="stat-lbl">Avg HR</div>
+        </div>
+      </div>
+    </div>
+
     <div class="card" id="dash-workout-card">
       <div class="card-title">Today's Workout</div>
       <div id="dash-workout-content" style="font-size:0.9rem;color:var(--muted);">No workout planned for today. Head to Workout tab to add one.</div>
@@ -924,6 +942,10 @@ function getBodyLog() {
   try { return JSON.parse(localStorage.getItem('ft_body')) || []; } catch { return []; }
 }
 function saveBodyLog(log) { localStorage.setItem('ft_body', JSON.stringify(log)); }
+function getActivityLog() {
+  try { return JSON.parse(localStorage.getItem('ft_activity')) || []; } catch { return []; }
+}
+function saveActivityLog(log) { localStorage.setItem('ft_activity', JSON.stringify(log)); }
 function getWorkout(date) {
   try { return JSON.parse(localStorage.getItem('ft_workout_' + date)) || { exercises: [], type: '' }; } catch { return { exercises: [], type: '' }; }
 }
@@ -1104,6 +1126,22 @@ function renderDashboard() {
   const bLog = getBodyLog();
   const latestB = bLog[bLog.length - 1];
   document.getElementById('dash-fat-pct').textContent = latestB ? latestB.fat_pct + '%' : '—';
+
+  // Activity (from Apple Health import)
+  const actLog = getActivityLog();
+  const todayAct = actLog.find(e => e.date === todayStr());
+  const actCard = document.getElementById('dash-activity-card');
+  if (todayAct || actLog.length) {
+    const latest = todayAct || actLog[actLog.length - 1]; // show today or most recent
+    actCard.style.display = 'block';
+    document.getElementById('dash-steps').textContent = latest.steps ? latest.steps.toLocaleString() : '—';
+    document.getElementById('dash-active-cal').textContent = latest.active_cal || '—';
+    document.getElementById('dash-hr').textContent = latest.avg_hr || '—';
+    if (!todayAct && latest) actCard.querySelector('.card-title').textContent = `Activity — ${fmtDate(latest.date)}`;
+    else actCard.querySelector('.card-title').textContent = "Today's Activity";
+  } else {
+    actCard.style.display = 'none';
+  }
 
   // Workout
   const wo = getWorkout(todayStr());
@@ -2246,7 +2284,7 @@ function exportData() {
   const data = {};
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key && key.startsWith('ft_')) {
+    if (key && (key.startsWith('ft_'))) {
       try { data[key] = JSON.parse(localStorage.getItem(key)); }
       catch { data[key] = localStorage.getItem(key); }
     }
@@ -2338,8 +2376,8 @@ function parseHealthAutoExport(raw) {
     entries.forEach(entry => {
       // Date can be in multiple fields, formats vary
       const rawDate = entry.date || entry.startDate || entry.dateString || entry.timestamp || '';
-      const dateStr = rawDate.slice(0, 10); // YYYY-MM-DD
-      const val = entry.qty ?? entry.value ?? entry.Avg ?? entry.avg ?? entry.quantity ?? null;
+      const dateStr = rawDate.slice(0, 10); // YYYY-MM-DD from "2026-03-07 00:00:00 +0000"
+      const val = entry.qty ?? entry.value ?? entry.Avg ?? entry.avg ?? entry.quantity ?? entry.Max ?? null;
       if (dateStr && dateStr.length === 10 && val !== null && !isNaN(+val)) {
         result[key].push({ date: dateStr, value: +val });
       }
@@ -2415,10 +2453,39 @@ function applyHealthImport(result) {
     saveBodyLog(bLog);
   }
 
-  const total = counts.weight + counts.body;
+  // Activity data (steps, active calories, heart rate)
+  if (result.steps.length || result.activeCalories.length || result.heartRate.length) {
+    let actLog = getActivityLog();
+    const allDates = new Set([
+      ...result.steps.map(e => e.date),
+      ...result.activeCalories.map(e => e.date),
+      ...result.heartRate.map(e => e.date)
+    ]);
+    const stepsMap = Object.fromEntries(result.steps.map(e => [e.date, e.value]));
+    const calMap = Object.fromEntries(result.activeCalories.map(e => [e.date, e.value]));
+    const hrMap = Object.fromEntries(result.heartRate.map(e => [e.date, e.value]));
+    const existingMap = Object.fromEntries(actLog.map((e, i) => [e.date, i]));
+
+    allDates.forEach(date => {
+      const entry = {
+        date,
+        steps: Math.round(stepsMap[date] || 0),
+        active_cal: Math.round(calMap[date] || 0),
+        avg_hr: Math.round(hrMap[date] || 0)
+      };
+      const idx = existingMap[date];
+      if (idx !== undefined) { actLog[idx] = { ...actLog[idx], ...entry }; counts.updated++; }
+      else { actLog.push(entry); counts.activity = (counts.activity || 0) + 1; }
+    });
+    actLog.sort((a, b) => a.date.localeCompare(b.date));
+    saveActivityLog(actLog);
+  }
+
+  const total = counts.weight + counts.body + (counts.activity || 0);
   const parts = [];
   if (counts.weight) parts.push(`${counts.weight} new weight`);
   if (counts.body) parts.push(`${counts.body} new body comp`);
+  if (counts.activity) parts.push(`${counts.activity} new activity`);
   if (counts.updated) parts.push(`${counts.updated} updated`);
 
   statusEl.innerHTML = `✓ Found: ${found.join(', ')}<br>` +
