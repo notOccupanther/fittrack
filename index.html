@@ -817,6 +817,8 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
       <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">API Keys — stored only on this device</div>
       <div class="field">
         <label>Anthropic API Key <span style="color:var(--accent2)">(AI Coach)</span></label>
+        <input type="password" id="s-openai" placeholder="sk-proj-..." style="font-size:0.85rem;margin-bottom:8px;">
+        <label style="font-size:0.75rem;color:var(--muted);">Anthropic key (fallback)</label>
         <input type="password" id="s-anthropic" placeholder="sk-ant-api03-..." style="font-size:0.85rem;">
       </div>
       <div class="field">
@@ -905,6 +907,7 @@ function getUsdaKeyEffective() {
 }
 function getUsdaKey() { return getUsdaKeyEffective(); }
 function getAnthropicKey() { return getSettings().anthropic_key || ''; }
+function getOpenAIKey() { return getSettings().openai_key || ''; }
 
 // ═══════════════════════════════════════════════════════════
 // STATE
@@ -2067,26 +2070,57 @@ async function sendChat() {
   const systemPrompt = `You are a concise, practical fitness coach. The user is ${profile?.name || 'the user'}, goal: ${profile?.goal || 'fitness'}, current weight: ${profile?.weight_kg || '?'}kg. Today's session: ${wo.type || 'General'}. Give specific, actionable advice in 2-3 sentences. No fluff.`;
 
   try {
-    const key = getAnthropicKey();
-  if (!key) { thinking.classList.remove('chat-thinking'); thinking.textContent = 'Add your Anthropic API key in ⚙️ Settings to use the AI coach.'; return; }
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-        'anthropic-dangerous-allow-browser': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 300,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: msg }]
-      })
-    });
-    const data = await res.json();
+    const openaiKey = getOpenAIKey();
+    const anthropicKey = getAnthropicKey();
+    if (!openaiKey && !anthropicKey) {
+      thinking.classList.remove('chat-thinking');
+      thinking.textContent = 'Add an OpenAI or Anthropic API key in ⚙️ Settings to use the AI coach.';
+      return;
+    }
+
+    let replyText = null;
+
+    if (openaiKey) {
+      // OpenAI (GPT-4o mini — fast, cheap)
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          max_tokens: 300,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: msg }
+          ]
+        })
+      });
+      const data = await res.json();
+      replyText = data.choices?.[0]?.message?.content || data.error?.message || null;
+    }
+
+    if (!replyText && anthropicKey) {
+      // Anthropic fallback
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+          'anthropic-dangerous-allow-browser': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-haiku-20241022',
+          max_tokens: 300,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: msg }]
+        })
+      });
+      const data = await res.json();
+      replyText = data.content?.[0]?.text || data.error?.message || null;
+    }
+
     thinking.classList.remove('chat-thinking');
-    thinking.textContent = data.content?.[0]?.text || 'No response. Check your API key.';
+    thinking.textContent = replyText || 'No response. Check your API key.';
   } catch(e) {
     thinking.classList.remove('chat-thinking');
     thinking.textContent = 'Could not reach AI coach. Check connection and API key.';
@@ -2241,6 +2275,7 @@ function submitPin() {
 // ═══════════════════════════════════════════════════════════
 function openSettings() {
   const s = getSettings();
+  document.getElementById('s-openai').value = s.openai_key || '';
   document.getElementById('s-anthropic').value = s.anthropic_key || '';
   document.getElementById('s-usda').value = s.usda_key || '';
   // PIN state
@@ -2256,6 +2291,7 @@ function closeSettings() {
 }
 function saveSettings() {
   const s = {
+    openai_key: document.getElementById('s-openai').value.trim(),
     anthropic_key: document.getElementById('s-anthropic').value.trim(),
     usda_key: document.getElementById('s-usda').value.trim() || 'DEMO_KEY'
   };
