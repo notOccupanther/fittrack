@@ -322,8 +322,13 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 
   <!-- ── Dashboard ── -->
   <div class="tab-panel active" id="tab-dashboard">
-    <div class="greeting" id="dash-greeting">Good morning 👋</div>
-    <div class="greeting-date" id="dash-date"></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0;">
+      <div>
+        <div class="greeting" id="dash-greeting">Good morning 👋</div>
+        <div class="greeting-date" id="dash-date"></div>
+      </div>
+      <button onclick="openSettings()" style="background:var(--surface2);border:none;color:var(--muted);border-radius:10px;padding:8px 10px;font-size:1.1rem;cursor:pointer;margin-top:4px;">⚙️</button>
+    </div>
 
     <div class="card" style="text-align:center;">
       <div class="card-title">Calories Today</div>
@@ -624,6 +629,30 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
   </nav>
 </div>
 
+<!-- Settings modal -->
+<div id="settings-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:800;display:none;align-items:flex-end;justify-content:center;">
+  <div style="background:var(--surface);border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:480px;padding-bottom:calc(24px + env(safe-area-inset-bottom));">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <div style="font-size:1.2rem;font-weight:800;">⚙️ Settings</div>
+      <button onclick="closeSettings()" style="background:var(--surface2);border:none;color:var(--text);border-radius:8px;padding:6px 12px;font-size:0.85rem;cursor:pointer;">Done</button>
+    </div>
+    <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">API Keys — stored only on this device</div>
+    <div class="field">
+      <label>Anthropic API Key <span style="color:var(--accent2)">(AI Coach)</span></label>
+      <input type="password" id="s-anthropic" placeholder="sk-ant-api03-..." style="font-size:0.85rem;">
+    </div>
+    <div class="field">
+      <label>USDA Food API Key <span style="color:var(--muted)">(optional — DEMO_KEY works for testing)</span></label>
+      <input type="text" id="s-usda" placeholder="DEMO_KEY or your key from fdc.nal.usda.gov" style="font-size:0.85rem;">
+    </div>
+    <button class="btn" onclick="saveSettings()" style="margin-top:4px;">Save Keys</button>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px;">
+      <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">Profile</div>
+      <button class="btn btn-ghost" onclick="resetProfile()">Reset Profile & Onboarding</button>
+    </div>
+  </div>
+</div>
+
 <!-- Photo fullscreen modal -->
 <div id="photo-modal">
   <button class="close-modal" onclick="closePhotoModal()">✕</button>
@@ -632,10 +661,13 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 
 <script>
 // ═══════════════════════════════════════════════════════════
-// CONFIG — replace with real keys
+// CONFIG — keys loaded from localStorage settings
 // ═══════════════════════════════════════════════════════════
-const USDA_API_KEY = 'DEMO_KEY'; // Get free key: https://fdc.nal.usda.gov/api-key-signup/
-const ANTHROPIC_KEY = 'YOUR_ANTHROPIC_KEY_HERE'; // Anthropic API key
+function getSettings() {
+  try { return JSON.parse(localStorage.getItem('ft_settings')) || {}; } catch { return {}; }
+}
+function getUsdaKey() { return getSettings().usda_key || 'DEMO_KEY'; }
+function getAnthropicKey() { return getSettings().anthropic_key || ''; }
 
 // ═══════════════════════════════════════════════════════════
 // STATE
@@ -939,7 +971,7 @@ async function searchFood(query) {
   res.style.display = 'block';
   res.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.85rem;">Searching...</div>';
   try {
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${USDA_API_KEY}&pageSize=8&dataType=SR%20Legacy,Foundation`;
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${getUsdaKey()}&pageSize=8&dataType=SR%20Legacy,Foundation`;
     const r = await fetch(url);
     const data = await r.json();
     if (!data.foods?.length) { res.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.85rem;">No results. Try adding manually.</div>'; return; }
@@ -1241,10 +1273,12 @@ async function sendChat() {
   const systemPrompt = `You are a concise, practical fitness coach. The user is ${profile?.name || 'the user'}, goal: ${profile?.goal || 'fitness'}, current weight: ${profile?.weight_kg || '?'}kg. Today's session: ${wo.type || 'General'}. Give specific, actionable advice in 2-3 sentences. No fluff.`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const key = getAnthropicKey();
+  if (!key) { thinking.classList.remove('chat-thinking'); thinking.textContent = 'Add your Anthropic API key in ⚙️ Settings to use the AI coach.'; return; }
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        'x-api-key': ANTHROPIC_KEY,
+        'x-api-key': key,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
         'anthropic-dangerous-allow-browser': 'true'
@@ -1343,6 +1377,33 @@ async function deletePhoto(id) {
 function initApp() {
   renderDashboard();
   openPhotoDB(); // warm up
+}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════════════
+function openSettings() {
+  const s = getSettings();
+  document.getElementById('s-anthropic').value = s.anthropic_key || '';
+  document.getElementById('s-usda').value = s.usda_key || '';
+  document.getElementById('settings-modal').style.display = 'flex';
+}
+function closeSettings() {
+  document.getElementById('settings-modal').style.display = 'none';
+}
+function saveSettings() {
+  const s = {
+    anthropic_key: document.getElementById('s-anthropic').value.trim(),
+    usda_key: document.getElementById('s-usda').value.trim() || 'DEMO_KEY'
+  };
+  localStorage.setItem('ft_settings', JSON.stringify(s));
+  closeSettings();
+  showToast('Keys saved ✓');
+}
+function resetProfile() {
+  if (!confirm('Reset profile and start onboarding again?')) return;
+  localStorage.removeItem('ft_profile');
+  location.reload();
 }
 
 // Bootstrap
