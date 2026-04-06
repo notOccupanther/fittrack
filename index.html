@@ -812,10 +812,15 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 // ═══════════════════════════════════════════════════════════
 // CONFIG — keys loaded from localStorage settings
 // ═══════════════════════════════════════════════════════════
+const USDA_DEFAULT_KEY = 'v9hq3duceCqWHGS55dmIdvThKarVF9TDxtQJDS4u';
 function getSettings() {
   try { return JSON.parse(localStorage.getItem('ft_settings')) || {}; } catch { return {}; }
 }
-function getUsdaKey() { return getSettings().usda_key || 'DEMO_KEY'; }
+function getUsdaKeyEffective() {
+  const s = getSettings();
+  return (s.usda_key && s.usda_key !== 'DEMO_KEY') ? s.usda_key : USDA_DEFAULT_KEY;
+}
+function getUsdaKey() { return getUsdaKeyEffective(); }
 function getAnthropicKey() { return getSettings().anthropic_key || ''; }
 
 // ═══════════════════════════════════════════════════════════
@@ -1330,19 +1335,16 @@ function showLocalFoodResults(query) {
 
 async function searchFoodAPI(query) {
   const res = document.getElementById('search-results');
-  const usdaKey = getUsdaKey();
 
-  // Try USDA first if user has a real key
-  if (usdaKey && usdaKey !== 'DEMO_KEY') {
-    try {
-      const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${usdaKey}&pageSize=8&dataType=SR%20Legacy,Foundation`;
-      const r = await fetch(url);
-      const data = await r.json();
-      if (data.foods?.length) { renderUSDAResults(data.foods, res); return; }
-    } catch {}
-  }
+  // USDA — always primary (real key available)
+  try {
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${getUsdaKey()}&pageSize=10&dataType=SR%20Legacy,Foundation`;
+    const r = await fetch(url);
+    const data = await r.json();
+    if (data.foods?.length) { renderUSDAResults(data.foods, res); return; }
+  } catch {}
 
-  // Fallback: Open Food Facts (free, no key, no rate limit)
+  // Fallback: Open Food Facts (branded/packaged foods)
   try {
     const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=1&page_size=8&sort_by=unique_scans_n&fields=product_name,nutriments,brands`;
     const r = await fetch(url);
@@ -1350,8 +1352,6 @@ async function searchFoodAPI(query) {
     const products = (data.products || []).filter(p => p.product_name && p.nutriments?.['energy-kcal_100g']);
     if (products.length) { renderOFFResults(products, res, query); return; }
   } catch {}
-
-  // If API results came back empty, local results are already showing — just quietly do nothing
 }
 
 function renderUSDAResults(foods, res) {
