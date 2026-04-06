@@ -164,16 +164,32 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 
 /* ── WORKOUT ── */
 .workout-type-input { font-size: 1rem; font-weight: 600; }
-.exercise-row { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border); }
-.exercise-row:last-child { border-bottom: none; }
-.ex-done { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--border); background: none; cursor: pointer; flex-shrink: 0; }
-.ex-done.checked { background: var(--success); border-color: var(--success); }
-.ex-name { font-weight: 600; font-size: 0.9rem; flex: 1; }
-.ex-detail { font-size: 0.75rem; color: var(--muted); }
-.ex-del { background: none; border: none; color: var(--dim); font-size: 1rem; cursor: pointer; padding: 4px 6px; }
+.ex-card { background: var(--surface2); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
+.ex-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ex-card-name { font-weight: 700; font-size: 0.95rem; flex: 1; }
+.ex-card-del { background: none; border: none; color: var(--dim); font-size: 1.1rem; cursor: pointer; padding: 2px 6px; }
+.set-table { width: 100%; border-collapse: collapse; }
+.set-table th { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding: 0 4px 8px; text-align: center; }
+.set-table th:first-child { text-align: left; width: 36px; }
+.set-table th:last-child { width: 32px; }
+.set-row td { padding: 4px; vertical-align: middle; }
+.set-num { font-size: 0.78rem; font-weight: 700; color: var(--muted); padding: 0 4px; }
+.set-input { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 0.95rem; font-weight: 600; text-align: center; padding: 8px 4px; width: 100%; min-width: 0; }
+.set-input:focus { border-color: var(--accent); outline: none; }
+.set-done-btn { width: 28px; height: 28px; border-radius: 7px; border: 2px solid var(--border); background: none; cursor: pointer; margin: auto; display: block; transition: all 0.15s; }
+.set-done-btn.done { background: var(--success); border-color: var(--success); }
+.set-del-btn { background: none; border: none; color: var(--dim); font-size: 0.9rem; cursor: pointer; padding: 4px 6px; display: block; margin: auto; }
+.add-set-btn { background: none; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 0.8rem; font-family: inherit; cursor: pointer; width: 100%; padding: 7px; margin-top: 8px; transition: border-color 0.2s, color 0.2s; }
+.add-set-btn:active { border-color: var(--accent); color: var(--accent2); }
 .add-ex-form { background: var(--surface2); border-radius: 12px; padding: 14px; margin-bottom: 12px; display: none; }
 .ex-form-row { display: flex; gap: 8px; }
 .ex-form-row .field { flex: 1; }
+.ex-autocomplete { position: relative; }
+.ex-suggestions { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; z-index: 50; max-height: 200px; overflow-y: auto; display: none; margin-top: 4px; }
+.ex-suggestion { padding: 11px 14px; font-size: 0.9rem; cursor: pointer; border-bottom: 1px solid var(--border); }
+.ex-suggestion:last-child { border-bottom: none; }
+.ex-suggestion:active { background: var(--surface2); }
+.ex-suggestion mark { background: none; color: var(--accent2); font-weight: 700; }
 
 /* ── AI CHAT ── */
 .chat-panel { background: var(--surface2); border-radius: 14px; padding: 14px; }
@@ -554,11 +570,15 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 
     <div class="add-ex-form card" id="add-ex-form" style="display:none;">
       <div class="card-title">Add Exercise</div>
-      <div class="field"><label>Exercise Name</label><input type="text" id="ex-name" placeholder="e.g. Barbell Squat"></div>
+      <div class="field ex-autocomplete">
+        <label>Exercise Name</label>
+        <input type="text" id="ex-name" placeholder="e.g. Barbell Squat" oninput="filterExSuggestions(this.value)" autocomplete="off">
+        <div class="ex-suggestions" id="ex-suggestions"></div>
+      </div>
       <div class="ex-form-row">
-        <div class="field"><label>Sets</label><input type="number" id="ex-sets" value="3" min="1"></div>
-        <div class="field"><label>Reps</label><input type="number" id="ex-reps" value="10" min="1"></div>
-        <div class="field"><label>Weight (kg)</label><input type="number" id="ex-weight" placeholder="40" step="0.5"></div>
+        <div class="field"><label>Starting Sets</label><input type="number" id="ex-sets" value="3" min="1" max="10"></div>
+        <div class="field"><label>Default Reps</label><input type="number" id="ex-reps" value="10" min="1" max="50"></div>
+        <div class="field"><label>Default kg</label><input type="number" id="ex-weight" placeholder="0" step="0.5" min="0"></div>
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-sm btn-ghost" onclick="toggleAddExForm()">Cancel</button>
@@ -712,15 +732,9 @@ function getWorkout(date) {
   try { return JSON.parse(localStorage.getItem('ft_workout_' + date)) || { exercises: [], type: '' }; } catch { return { exercises: [], type: '' }; }
 }
 function saveWorkout() {
-  const type = document.getElementById('workout-type').value;
-  const exercises = [...document.querySelectorAll('.exercise-row')].map(row => ({
-    name: row.dataset.name,
-    sets: +row.dataset.sets,
-    reps: +row.dataset.reps,
-    weight_kg: +row.dataset.weight,
-    done: row.querySelector('.ex-done').classList.contains('checked')
-  }));
-  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify({ type, exercises }));
+  const wo = getWorkout(workoutDate);
+  wo.type = document.getElementById('workout-type').value;
+  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
   showToast('Workout saved');
 }
 function roundMacro(v) { return Math.round((v || 0) * 10) / 10; }
@@ -1178,6 +1192,76 @@ function logBodyComp() {
 // ═══════════════════════════════════════════════════════════
 // WORKOUT PLANNER
 // ═══════════════════════════════════════════════════════════
+
+const COMMON_EXERCISES = [
+  // Legs
+  'Barbell Squat','Front Squat','Goblet Squat','Leg Press','Hack Squat',
+  'Romanian Deadlift','Stiff-Leg Deadlift','Leg Curl','Leg Extension',
+  'Bulgarian Split Squat','Lunges','Walking Lunges','Step Ups','Hip Thrust',
+  'Glute Bridge','Calf Raises','Seated Calf Raises',
+  // Back
+  'Deadlift','Sumo Deadlift','Barbell Row','Pendlay Row','Dumbbell Row',
+  'Cable Row','T-Bar Row','Lat Pulldown','Pull Ups','Chin Ups','Assisted Pull Ups',
+  'Face Pull','Straight Arm Pulldown','Shrugs',
+  // Chest
+  'Barbell Bench Press','Incline Bench Press','Decline Bench Press',
+  'Dumbbell Press','Incline Dumbbell Press','Dumbbell Flyes','Cable Flyes',
+  'Chest Dips','Push Ups','Machine Chest Press','Pec Dec',
+  // Shoulders
+  'Overhead Press','Seated Dumbbell Press','Arnold Press','Lateral Raises',
+  'Front Raises','Rear Delt Flyes','Upright Row','Cable Lateral Raises',
+  // Arms
+  'Barbell Curl','Dumbbell Curl','Hammer Curl','Preacher Curl','Cable Curl',
+  'Tricep Pushdown','Skull Crushers','Overhead Tricep Extension',
+  'Dips','Close Grip Bench Press','Diamond Push Ups','Tricep Kickbacks',
+  // Core
+  'Plank','Side Plank','Crunches','Hanging Leg Raises','Cable Crunch',
+  'Ab Wheel','Russian Twists','Dead Bug','Bird Dog',
+  // Cardio
+  'Treadmill','Rowing Machine','Cycling','Stair Climber','Battle Ropes',
+  'Kettlebell Swings','Box Jumps','Burpees','Jump Rope'
+];
+
+function getExHistory() {
+  try { return JSON.parse(localStorage.getItem('ft_exercise_history')) || []; } catch { return []; }
+}
+function learnExercise(name) {
+  let h = getExHistory();
+  if (!h.includes(name)) { h.unshift(name); h = h.slice(0, 50); }
+  else { h = [name, ...h.filter(n => n !== name)]; }
+  localStorage.setItem('ft_exercise_history', JSON.stringify(h));
+}
+function getAllExercises() {
+  const hist = getExHistory();
+  const all = [...hist, ...COMMON_EXERCISES.filter(e => !hist.includes(e))];
+  return [...new Set(all)];
+}
+
+function filterExSuggestions(query) {
+  const box = document.getElementById('ex-suggestions');
+  if (!query.trim()) { box.style.display = 'none'; return; }
+  const q = query.toLowerCase();
+  const matches = getAllExercises().filter(e => e.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  box.innerHTML = matches.map(e => {
+    const hi = e.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<mark>$1</mark>');
+    return `<div class="ex-suggestion" onclick="selectExSuggestion('${e.replace(/'/g,"\\'")}')">` + hi + `</div>`;
+  }).join('');
+}
+
+function selectExSuggestion(name) {
+  document.getElementById('ex-name').value = name;
+  document.getElementById('ex-suggestions').style.display = 'none';
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.ex-autocomplete')) {
+    const box = document.getElementById('ex-suggestions');
+    if (box) box.style.display = 'none';
+  }
+});
+
 function renderWorkoutTab() {
   document.getElementById('workout-date-label').textContent = workoutDate === todayStr() ? 'Today' : fmtDate(workoutDate);
   const wo = getWorkout(workoutDate);
@@ -1195,42 +1279,106 @@ function workoutNavDate(dir) {
 function renderExerciseList(exercises) {
   const list = document.getElementById('exercise-list');
   if (!exercises.length) {
-    list.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:12px 0;">No exercises yet. Tap "+ Add Exercise" to start.</div>';
+    list.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:12px 0 4px;">No exercises yet. Tap "+ Add Exercise" to start.</div>';
     return;
   }
-  list.innerHTML = exercises.map((ex, i) => `
-    <div class="exercise-row" data-name="${ex.name}" data-sets="${ex.sets}" data-reps="${ex.reps}" data-weight="${ex.weight_kg||0}">
-      <div class="ex-done ${ex.done ? 'checked' : ''}" onclick="toggleExDone(this)"></div>
-      <div style="flex:1;">
-        <div class="ex-name">${ex.name}</div>
-        <div class="ex-detail">${ex.sets} × ${ex.reps}${ex.weight_kg ? ' @ ' + ex.weight_kg + 'kg' : ''}</div>
+  list.innerHTML = exercises.map((ex, ei) => {
+    // Normalise: support old flat format { sets:3, reps:10, weight_kg:40 }
+    let sets = ex.sets;
+    if (!Array.isArray(sets)) {
+      const count = +sets || 3;
+      sets = Array.from({ length: count }, () => ({ reps: ex.reps || 10, weight_kg: ex.weight_kg || 0, done: false }));
+    }
+    const allDone = sets.length > 0 && sets.every(s => s.done);
+    return `
+    <div class="ex-card" id="exc-${ei}">
+      <div class="ex-card-header">
+        <div class="ex-card-name" style="${allDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${ex.name}</div>
+        <button class="ex-card-del" onclick="removeExercise(${ei})" title="Remove exercise">✕</button>
       </div>
-      <button class="ex-del" onclick="removeExercise(${i})">✕</button>
-    </div>`).join('');
+      <table class="set-table">
+        <thead><tr><th>Set</th><th>Reps</th><th>kg</th><th>✓</th><th></th></tr></thead>
+        <tbody>
+          ${sets.map((s, si) => `
+          <tr class="set-row">
+            <td><span class="set-num">${si + 1}</span></td>
+            <td><input class="set-input" type="number" value="${s.reps || ''}" min="1" max="99" placeholder="—" style="width:54px;" onchange="updateSet(${ei},${si},'reps',this.value)" onfocus="this.select()"></td>
+            <td><input class="set-input" type="number" value="${s.weight_kg || ''}" min="0" step="0.5" placeholder="0" style="width:62px;" onchange="updateSet(${ei},${si},'weight_kg',this.value)" onfocus="this.select()"></td>
+            <td><button class="set-done-btn ${s.done ? 'done' : ''}" onclick="toggleSetDone(${ei},${si},this)"></button></td>
+            <td><button class="set-del-btn" onclick="removeSet(${ei},${si})">✕</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <button class="add-set-btn" onclick="addSet(${ei})">+ Add Set</button>
+    </div>`;
+  }).join('');
 }
 
 function toggleAddExForm() {
   const f = document.getElementById('add-ex-form');
   f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  if (f.style.display === 'block') setTimeout(() => document.getElementById('ex-name').focus(), 50);
 }
 
 function addExercise() {
   const name = document.getElementById('ex-name').value.trim();
   if (!name) { alert('Enter exercise name'); return; }
+  const numSets = +document.getElementById('ex-sets').value || 3;
+  const defaultReps = +document.getElementById('ex-reps').value || 10;
+  const defaultKg = +document.getElementById('ex-weight').value || 0;
   const wo = getWorkout(workoutDate);
   wo.exercises.push({
     name,
-    sets: +document.getElementById('ex-sets').value || 3,
-    reps: +document.getElementById('ex-reps').value || 10,
-    weight_kg: +document.getElementById('ex-weight').value || 0,
-    done: false
+    sets: Array.from({ length: numSets }, () => ({ reps: defaultReps, weight_kg: defaultKg, done: false }))
   });
   wo.type = document.getElementById('workout-type').value;
   localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+  learnExercise(name);
   document.getElementById('ex-name').value = '';
   document.getElementById('ex-weight').value = '';
+  document.getElementById('ex-suggestions').style.display = 'none';
   toggleAddExForm();
   renderExerciseList(wo.exercises);
+}
+
+function addSet(ei) {
+  const wo = getWorkout(workoutDate);
+  const ex = wo.exercises[ei];
+  if (!Array.isArray(ex.sets)) ex.sets = [];
+  const last = ex.sets[ex.sets.length - 1] || { reps: 10, weight_kg: 0 };
+  ex.sets.push({ reps: last.reps, weight_kg: last.weight_kg, done: false });
+  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+  renderExerciseList(wo.exercises);
+}
+
+function removeSet(ei, si) {
+  const wo = getWorkout(workoutDate);
+  const ex = wo.exercises[ei];
+  if (!Array.isArray(ex.sets) || ex.sets.length <= 1) return;
+  ex.sets.splice(si, 1);
+  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+  renderExerciseList(wo.exercises);
+}
+
+function updateSet(ei, si, field, value) {
+  const wo = getWorkout(workoutDate);
+  const ex = wo.exercises[ei];
+  if (!Array.isArray(ex.sets)) return;
+  ex.sets[si][field] = field === 'reps' ? (+value || 0) : (+value || 0);
+  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+}
+
+function toggleSetDone(ei, si, btn) {
+  const wo = getWorkout(workoutDate);
+  const ex = wo.exercises[ei];
+  if (!Array.isArray(ex.sets)) return;
+  ex.sets[si].done = !ex.sets[si].done;
+  btn.classList.toggle('done', ex.sets[si].done);
+  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+  // Check if all sets done — strike through exercise name
+  const allDone = ex.sets.every(s => s.done);
+  const nameEl = document.querySelector(`#exc-${ei} .ex-card-name`);
+  if (nameEl) { nameEl.style.textDecoration = allDone ? 'line-through' : ''; nameEl.style.opacity = allDone ? '0.5' : '1'; }
 }
 
 function removeExercise(i) {
@@ -1238,10 +1386,6 @@ function removeExercise(i) {
   wo.exercises.splice(i, 1);
   localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
   renderExerciseList(wo.exercises);
-}
-
-function toggleExDone(el) {
-  el.classList.toggle('checked');
 }
 
 function clearWorkout() {
