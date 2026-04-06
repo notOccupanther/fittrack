@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FitTrack">
+<meta name="theme-color" content="#7c6af7">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>FitTrack</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -231,6 +237,16 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 .week-table td { padding: 8px; border-top: 1px solid var(--border); }
 .trend-up { color: var(--danger); }
 .trend-down { color: var(--success); }
+
+/* ── Previous session comparison ── */
+.prev-session { font-size:0.72rem; color:var(--muted); padding:4px 0 8px; border-bottom:1px solid var(--border); margin-bottom:4px; }
+.prev-set-label { font-size:0.68rem; color:var(--dim); white-space:nowrap; font-variant-numeric:tabular-nums; }
+
+/* ── Rest timer ── */
+#rest-timer { position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:700;width:calc(100% - 32px);max-width:420px; }
+.rest-timer-inner { background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 18px;box-shadow:0 -4px 24px rgba(0,0,0,0.5); }
+.rt-preset { background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:0.7rem;font-weight:700;color:var(--muted);cursor:pointer;font-family:inherit;font-variant-numeric:tabular-nums; }
+.rt-preset:active { background:var(--accent);color:var(--text);border-color:var(--accent); }
 
 /* ── Meal pills ── */
 .meal-pills { display:flex; gap:6px; flex-wrap:wrap; }
@@ -806,6 +822,25 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
     <div style="border-top:1px solid var(--border);padding-top:16px;">
       <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:12px;">Profile</div>
       <button class="btn btn-ghost" onclick="resetProfile()">Reset Profile & Onboarding</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rest timer (floating) -->
+<div id="rest-timer" style="display:none;">
+  <div class="rest-timer-inner">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);">Rest Timer</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="startRestTimer(60)" class="rt-preset">1:00</button>
+        <button onclick="startRestTimer(90)" class="rt-preset">1:30</button>
+        <button onclick="startRestTimer(120)" class="rt-preset">2:00</button>
+        <button onclick="dismissRestTimer()" style="background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer;padding:4px;">✕</button>
+      </div>
+    </div>
+    <div id="rest-timer-label" style="font-size:2.2rem;font-weight:900;text-align:center;font-variant-numeric:tabular-nums;">1:30</div>
+    <div style="height:4px;background:var(--surface2);border-radius:2px;margin-top:8px;overflow:hidden;">
+      <div id="rest-timer-bar" style="height:100%;width:100%;background:var(--accent);border-radius:2px;transition:width 1s linear;"></div>
     </div>
   </div>
 </div>
@@ -1759,6 +1794,69 @@ function workoutNavDate(dir) {
   renderWorkoutTab();
 }
 
+// ─── Previous Session Lookup ──────────────────────────────
+function findPreviousSession(exerciseName) {
+  const name = exerciseName.toLowerCase();
+  // Search backwards through dates (last 60 days, skip current)
+  const today = new Date(workoutDate + 'T00:00:00');
+  for (let i = 1; i <= 60; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    const ds = d.toISOString().split('T')[0];
+    const raw = localStorage.getItem('ft_workout_' + ds);
+    if (!raw) continue;
+    try {
+      const wo = JSON.parse(raw);
+      const ex = (wo.exercises || []).find(e => e.name.toLowerCase() === name);
+      if (ex) {
+        let sets = ex.sets;
+        if (!Array.isArray(sets)) sets = Array.from({ length: +sets || 3 }, () => ({ reps: ex.reps || 0, weight_kg: ex.weight_kg || 0 }));
+        return { date: ds, sets };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+// ─── Rest Timer ───────────────────────────────────────────
+let restTimerInterval = null;
+let restTimeLeft = 0;
+let restTimerDefault = 90; // seconds
+
+function startRestTimer(seconds) {
+  restTimeLeft = seconds || restTimerDefault;
+  clearInterval(restTimerInterval);
+  const el = document.getElementById('rest-timer');
+  const bar = document.getElementById('rest-timer-bar');
+  const label = document.getElementById('rest-timer-label');
+  const total = restTimeLeft;
+  el.style.display = 'flex';
+  
+  function tick() {
+    const mins = Math.floor(restTimeLeft / 60);
+    const secs = restTimeLeft % 60;
+    label.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    bar.style.width = Math.round((restTimeLeft / total) * 100) + '%';
+    if (restTimeLeft <= 0) {
+      clearInterval(restTimerInterval);
+      label.textContent = "GO!";
+      bar.style.width = '0%';
+      bar.style.background = '#4ade80';
+      // Vibrate if supported
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      setTimeout(() => { el.style.display = 'none'; bar.style.background = 'var(--accent)'; }, 3000);
+      return;
+    }
+    restTimeLeft--;
+  }
+  tick();
+  restTimerInterval = setInterval(tick, 1000);
+}
+
+function dismissRestTimer() {
+  clearInterval(restTimerInterval);
+  document.getElementById('rest-timer').style.display = 'none';
+}
+
 function renderExerciseList(exercises) {
   const list = document.getElementById('exercise-list');
   if (!exercises.length) {
@@ -1773,23 +1871,36 @@ function renderExerciseList(exercises) {
       sets = Array.from({ length: count }, () => ({ reps: ex.reps || 10, weight_kg: ex.weight_kg || 0, done: false }));
     }
     const allDone = sets.length > 0 && sets.every(s => s.done);
+    const prev = findPreviousSession(ex.name);
+    let prevHtml = '';
+    if (prev) {
+      const prevDate = new Date(prev.date + 'T00:00:00').toLocaleDateString('en-IE', { day:'numeric', month:'short' });
+      const prevSummary = prev.sets.map((s, i) => `${s.weight_kg || 0}kg × ${s.reps || 0}`).join(', ');
+      prevHtml = `<div class="prev-session">📊 Last: ${prevDate} — ${prevSummary}</div>`;
+    }
     return `
     <div class="ex-card" id="exc-${ei}">
       <div class="ex-card-header">
         <div class="ex-card-name" style="${allDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${ex.name}</div>
         <button class="ex-card-del" onclick="removeExercise(${ei})" title="Remove exercise">✕</button>
       </div>
+      ${prevHtml}
       <table class="set-table">
-        <thead><tr><th>Set</th><th>Reps</th><th>kg</th><th>✓</th><th></th></tr></thead>
+        <thead><tr><th>Set</th><th>Reps</th><th>kg</th><th>Last</th><th>✓</th><th></th></tr></thead>
         <tbody>
-          ${sets.map((s, si) => `
+          ${sets.map((s, si) => {
+            const prevSet = prev && prev.sets[si] ? prev.sets[si] : null;
+            const lastLabel = prevSet ? `${prevSet.weight_kg || 0}×${prevSet.reps || 0}` : '—';
+            return `
           <tr class="set-row">
             <td><span class="set-num">${si + 1}</span></td>
-            <td><input class="set-input" type="number" value="${s.reps || ''}" min="1" max="99" placeholder="—" style="width:54px;" onchange="updateSet(${ei},${si},'reps',this.value)" onfocus="this.select()"></td>
-            <td><input class="set-input" type="number" value="${s.weight_kg || ''}" min="0" step="0.5" placeholder="0" style="width:62px;" onchange="updateSet(${ei},${si},'weight_kg',this.value)" onfocus="this.select()"></td>
+            <td><input class="set-input" type="number" value="${s.reps || ''}" min="1" max="99" placeholder="${prevSet ? prevSet.reps : '—'}" style="width:54px;" onchange="updateSet(${ei},${si},'reps',this.value)" onfocus="this.select()"></td>
+            <td><input class="set-input" type="number" value="${s.weight_kg || ''}" min="0" step="0.5" placeholder="${prevSet ? prevSet.weight_kg : '0'}" style="width:62px;" onchange="updateSet(${ei},${si},'weight_kg',this.value)" onfocus="this.select()"></td>
+            <td><span class="prev-set-label">${lastLabel}</span></td>
             <td><button class="set-done-btn ${s.done ? 'done' : ''}" onclick="toggleSetDone(${ei},${si},this)"></button></td>
             <td><button class="set-del-btn" onclick="removeSet(${ei},${si})">✕</button></td>
-          </tr>`).join('')}
+          </tr>`;
+          }).join('')}
         </tbody>
       </table>
       <button class="add-set-btn" onclick="addSet(${ei})">+ Add Set</button>
@@ -1862,6 +1973,8 @@ function toggleSetDone(ei, si, btn) {
   const allDone = ex.sets.every(s => s.done);
   const nameEl = document.querySelector(`#exc-${ei} .ex-card-name`);
   if (nameEl) { nameEl.style.textDecoration = allDone ? 'line-through' : ''; nameEl.style.opacity = allDone ? '0.5' : '1'; }
+  // Start rest timer when marking a set done (not when unmarking)
+  if (ex.sets[si].done && !allDone) startRestTimer(restTimerDefault);
 }
 
 function removeExercise(i) {
@@ -2292,6 +2405,11 @@ if (profile) {
   document.getElementById('app').style.display = 'flex';
   // Check PIN before showing app
   if (!checkPinOnLoad()) initApp();
+}
+
+// PWA Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 </script>
 </body>
