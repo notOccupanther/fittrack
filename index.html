@@ -892,19 +892,100 @@ label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6
 
 <script>
 // ═══════════════════════════════════════════════════════════
+// INDEXED DB — persistent storage (replaces localStorage)
+// ═══════════════════════════════════════════════════════════
+let _db = null;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    if (_db) { resolve(_db); return; }
+    const req = indexedDB.open('fittrack', 2);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('photos'))   db.createObjectStore('photos',   { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('kv'))       db.createObjectStore('kv',       { keyPath: 'k' });
+      if (!db.objectStoreNames.contains('food_log')) db.createObjectStore('food_log', { keyPath: 'date' });
+      if (!db.objectStoreNames.contains('workouts')) db.createObjectStore('workouts', { keyPath: 'date' });
+    };
+    req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+    req.onerror   = reject;
+  });
+}
+
+function idbGet(store, key) {
+  return openDB().then(db => new Promise(resolve => {
+    const req = db.transaction(store, 'readonly').objectStore(store).get(key);
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = ()  => resolve(null);
+  }));
+}
+function idbPut(store, value) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).put(value);
+    tx.oncomplete = resolve; tx.onerror = reject;
+  }));
+}
+function idbDelete(store, key) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).delete(key);
+    tx.oncomplete = resolve; tx.onerror = reject;
+  }));
+}
+function idbGetAll(store) {
+  return openDB().then(db => new Promise(resolve => {
+    const req = db.transaction(store, 'readonly').objectStore(store).getAll();
+    req.onsuccess = e => resolve(e.target.result ?? []);
+    req.onerror   = ()  => resolve([]);
+  }));
+}
+
+async function kvGet(key)        { const r = await idbGet('kv', key); return r ? r.v : null; }
+async function kvSet(key, value) { await idbPut('kv', { k: key, v: value }); }
+async function kvDel(key)        { await idbDelete('kv', key); }
+
+// One-time migration: copy existing ft_* localStorage keys into IndexedDB
+async function migrateFromLocalStorage() {
+  if (await kvGet('_migrated')) return;
+  try {
+    const parse = raw => { try { return JSON.parse(raw); } catch { return raw; } };
+    const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+                      .filter(k => k && k.startsWith('ft_'));
+    for (const key of keys) {
+      const val = parse(localStorage.getItem(key));
+      if      (key === 'ft_profile')           await kvSet('profile', val);
+      else if (key === 'ft_settings')          await kvSet('settings', val);
+      else if (key === 'ft_pin')               await kvSet('pin', val);
+      else if (key === 'ft_weight')            await kvSet('weight_log', val);
+      else if (key === 'ft_body')              await kvSet('body_log', val);
+      else if (key === 'ft_activity')          await kvSet('activity_log', val);
+      else if (key === 'ft_food_db')           await kvSet('food_db', val);
+      else if (key === 'ft_exercise_history')  await kvSet('exercise_history', val);
+      else if (key.startsWith('ft_food_')) {
+        const date = key.slice(8);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) await idbPut('food_log', { date, items: val || [] });
+      } else if (key.startsWith('ft_workout_')) {
+        const date = key.slice(11);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) await idbPut('workouts', { date, ...(val || {}) });
+      }
+    }
+  } catch(e) { console.warn('IDB migration error:', e); }
+  await kvSet('_migrated', true);
+}
+
+// ═══════════════════════════════════════════════════════════
 // CONFIG — keys loaded from localStorage settings
 // ═══════════════════════════════════════════════════════════
 const USDA_DEFAULT_KEY = 'v9hq3duceCqWHGS55dmIdvThKarVF9TDxtQJDS4u';
-function getSettings() {
-  try { return JSON.parse(localStorage.getItem('ft_settings')) || {}; } catch { return {}; }
-}
-function getUsdaKeyEffective() {
-  const s = getSettings();
+async function getSettings() { return (await kvGet('settings')) || {}; }
+async function getUsdaKeyEffective() {
+  const s = await getSettings();
   return (s.usda_key && s.usda_key !== 'DEMO_KEY') ? s.usda_key : USDA_DEFAULT_KEY;
 }
-function getUsdaKey() { return getUsdaKeyEffective(); }
-function getAnthropicKey() { return getSettings().anthropic_key || ''; }
-function getOpenAIKey() { return getSettings().openai_key || ''; }
+async function getUsdaKey() { return getUsdaKeyEffective(); }
+async function getAnthropicKey() { return (await getSettings()).anthropic_key || ''; }
+async function getOpenAIKey()    { return (await getSettings()).openai_key    || ''; }
 
 // ═══════════════════════════════════════════════════════════
 // STATE
@@ -936,42 +1017,36 @@ function fmtDate(str) {
   const d = new Date(str + 'T00:00:00');
   return d.toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' });
 }
-function getProfile() {
-  try { return JSON.parse(localStorage.getItem('ft_profile')) || null; } catch { return null; }
+async function getProfile()             { return await kvGet('profile'); }
+async function saveProfile(p)           { await kvSet('profile', p); }
+async function getFoodLog(date)         { const r = await idbGet('food_log', date); return r ? r.items : []; }
+async function saveFoodLog(date, items) { await idbPut('food_log', { date, items }); }
+async function getWeightLog()           { return (await kvGet('weight_log'))      || []; }
+async function saveWeightLog(log)       { await kvSet('weight_log', log); }
+async function getBodyLog()             { return (await kvGet('body_log'))         || []; }
+async function saveBodyLog(log)         { await kvSet('body_log', log); }
+async function getActivityLog()         { return (await kvGet('activity_log'))     || []; }
+async function saveActivityLog(log)     { await kvSet('activity_log', log); }
+async function getWorkout(date) {
+  const r = await idbGet('workouts', date);
+  return r ? { type: r.type || '', exercises: r.exercises || [] } : { type: '', exercises: [] };
 }
-function saveProfile(p) { localStorage.setItem('ft_profile', JSON.stringify(p)); }
-function getFoodLog(date) {
-  try { return JSON.parse(localStorage.getItem('ft_food_' + date)) || []; } catch { return []; }
-}
-function saveFoodLog(date, items) { localStorage.setItem('ft_food_' + date, JSON.stringify(items)); }
-function getWeightLog() {
-  try { return JSON.parse(localStorage.getItem('ft_weight')) || []; } catch { return []; }
-}
-function saveWeightLog(log) { localStorage.setItem('ft_weight', JSON.stringify(log)); }
-function getBodyLog() {
-  try { return JSON.parse(localStorage.getItem('ft_body')) || []; } catch { return []; }
-}
-function saveBodyLog(log) { localStorage.setItem('ft_body', JSON.stringify(log)); }
-function getActivityLog() {
-  try { return JSON.parse(localStorage.getItem('ft_activity')) || []; } catch { return []; }
-}
-function saveActivityLog(log) { localStorage.setItem('ft_activity', JSON.stringify(log)); }
-function getWorkout(date) {
-  try { return JSON.parse(localStorage.getItem('ft_workout_' + date)) || { exercises: [], type: '' }; } catch { return { exercises: [], type: '' }; }
+async function saveWorkoutData(date, wo) {
+  await idbPut('workouts', { date, type: wo.type || '', exercises: wo.exercises || [] });
 }
 let autoSaveTimer = null;
 function autoSaveWorkoutType() {
   clearTimeout(autoSaveTimer);
-  autoSaveTimer = setTimeout(() => {
-    const wo = getWorkout(workoutDate);
+  autoSaveTimer = setTimeout(async () => {
+    const wo = await getWorkout(workoutDate);
     wo.type = document.getElementById('workout-type').value;
-    localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+    await saveWorkoutData(workoutDate, wo);
   }, 600);
 }
-function saveWorkout() {
-  const wo = getWorkout(workoutDate);
+async function saveWorkout() {
+  const wo = await getWorkout(workoutDate);
   wo.type = document.getElementById('workout-type').value;
-  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+  await saveWorkoutData(workoutDate, wo);
   showToast('Saved ✓');
 }
 function roundMacro(v) { return Math.round((v || 0) * 10) / 10; }
@@ -1056,12 +1131,12 @@ function calculateTargets(data) {
   return { kcal, protein, carbs, fat, fibre: 25 };
 }
 
-function obFinish() {
+async function obFinish() {
   const tw = +document.getElementById('ob-target-weight').value || null;
   obData.target_weight = tw;
   obData.targets = calculateTargets(obData);
   obData.tdee = obData.targets.kcal;
-  saveProfile(obData);
+  await saveProfile(obData);
   document.getElementById('onboarding').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   initApp();
@@ -1070,35 +1145,34 @@ function obFinish() {
 // ═══════════════════════════════════════════════════════════
 // TAB NAVIGATION
 // ═══════════════════════════════════════════════════════════
-function switchTab(tab) {
+async function switchTab(tab) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
   document.getElementById('nav-' + tab).classList.add('active');
   currentTab = tab;
-  // Show coach FAB only on workout tab
   const fab = document.getElementById('coach-fab');
   if (fab) fab.classList.toggle('visible', tab === 'workout');
-  if (tab === 'dashboard') renderDashboard();
-  if (tab === 'food') { if (foodView === 'week') renderWeekPlanner(); else renderFoodTab(); }
-  if (tab === 'weight') renderWeightTab();
-  if (tab === 'body') renderBodyTab();
-  if (tab === 'workout') renderWorkoutTab();
+  if (tab === 'dashboard') await renderDashboard();
+  if (tab === 'food') { if (foodView === 'week') await renderWeekPlanner(); else await renderFoodTab(); }
+  if (tab === 'weight') await renderWeightTab();
+  if (tab === 'body') await renderBodyTab();
+  if (tab === 'workout') await renderWorkoutTab();
   if (tab === 'photos') renderPhotos();
 }
 
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function renderDashboard() {
-  const profile = getProfile();
+async function renderDashboard() {
+  const profile = await getProfile();
   if (!profile) return;
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   document.getElementById('dash-greeting').textContent = greet + ', ' + profile.name + ' 👋';
   document.getElementById('dash-date').textContent = new Date().toLocaleDateString('en-IE', { weekday:'long', day:'numeric', month:'long' });
 
-  const log = getFoodLog(todayStr());
+  const log = await getFoodLog(todayStr());
   const totals = log.reduce((a, item) => ({
     kcal: a.kcal + (item.kcal||0),
     protein: a.protein + (item.protein||0),
@@ -1133,19 +1207,19 @@ function renderDashboard() {
   });
 
   // Weight & body
-  const wLog = getWeightLog();
+  const wLog = await getWeightLog();
   const todayW = wLog.find(e => e.date === todayStr());
   document.getElementById('dash-weight').textContent = todayW ? todayW.weight_kg : '—';
-  const bLog = getBodyLog();
+  const bLog = await getBodyLog();
   const latestB = bLog[bLog.length - 1];
   document.getElementById('dash-fat-pct').textContent = latestB ? latestB.fat_pct + '%' : '—';
 
   // Activity (from Apple Health import)
-  const actLog = getActivityLog();
+  const actLog = await getActivityLog();
   const todayAct = actLog.find(e => e.date === todayStr());
   const actCard = document.getElementById('dash-activity-card');
   if (todayAct || actLog.length) {
-    const latest = todayAct || actLog[actLog.length - 1]; // show today or most recent
+    const latest = todayAct || actLog[actLog.length - 1];
     actCard.style.display = 'block';
     document.getElementById('dash-steps').textContent = latest.steps ? latest.steps.toLocaleString() : '—';
     document.getElementById('dash-active-cal').textContent = latest.active_cal || '—';
@@ -1157,7 +1231,7 @@ function renderDashboard() {
   }
 
   // Workout
-  const wo = getWorkout(todayStr());
+  const wo = await getWorkout(todayStr());
   const wContent = document.getElementById('dash-workout-content');
   if (wo.exercises.length) {
     wContent.innerHTML = `<strong>${wo.type || 'Workout'}</strong><br><span style="color:var(--muted);font-size:0.82rem;">${wo.exercises.length} exercises planned</span>`;
@@ -1180,7 +1254,7 @@ function setFoodView(view) {
   if (view === 'week') renderWeekPlanner();
 }
 
-function renderFoodTab() {
+async function renderFoodTab() {
   const label = document.getElementById('food-date-label');
   if (foodDate === todayStr()) label.textContent = 'Today';
   else {
@@ -1191,8 +1265,8 @@ function renderFoodTab() {
   }
   const heading = document.getElementById('food-log-heading');
   if (heading) heading.textContent = foodDate === todayStr() ? "Today's Log" : fmtDate(foodDate) + ' — Log';
-  updateMacroBars();
-  renderFoodList();
+  await updateMacroBars();
+  await renderFoodList();
 }
 
 function foodNavDate(dir) {
@@ -1217,8 +1291,8 @@ function weekPlanNav(dir) {
   renderWeekPlanner();
 }
 
-function renderWeekPlanner() {
-  const profile = getProfile();
+async function renderWeekPlanner() {
+  const profile = await getProfile();
   const target = profile?.targets?.kcal || 0;
   const weekStart = getWeekStart(weekPlanOffset);
   const today = todayStr();
@@ -1237,7 +1311,7 @@ function renderWeekPlanner() {
   for (let i = 0; i < 7; i++) {
     const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
     const dateStr = localDateStr(d);
-    const log = getFoodLog(dateStr);
+    const log = await getFoodLog(dateStr);
     const tot = log.reduce((a, item) => a + (item.kcal || 0), 0);
     const pct = target ? Math.min(100, Math.round(tot / target * 100)) : 0;
     const isToday = dateStr === today;
@@ -1280,15 +1354,14 @@ function jumpToDay(dateStr) {
 }
 
 // ─── Copy Day ─────────────────────────────────────────────
-function showCopyDayModal() {
+async function showCopyDayModal() {
   document.getElementById('copy-target-label').textContent = foodDate === todayStr() ? 'today' : fmtDate(foodDate);
-  // Find last 14 days with food logged (excluding current day)
   const options = [];
   for (let i = 1; i <= 30; i++) {
     const d = new Date(foodDate + 'T00:00:00');
     d.setDate(d.getDate() - i);
     const ds = localDateStr(d);
-    const log = getFoodLog(ds);
+    const log = await getFoodLog(ds);
     if (log.length) options.push({ date: ds, count: log.length, kcal: Math.round(log.reduce((a, x) => a + (x.kcal||0), 0)) });
     if (options.length >= 10) break;
   }
@@ -1309,20 +1382,20 @@ function showCopyDayModal() {
 
 function closeCopyDayModal() { document.getElementById('copy-day-modal').style.display = 'none'; }
 
-function copyDayMeals(fromDate) {
-  const source = getFoodLog(fromDate);
-  const current = getFoodLog(foodDate);
+async function copyDayMeals(fromDate) {
+  const source = await getFoodLog(fromDate);
+  const current = await getFoodLog(foodDate);
   const merged = [...current, ...source.map(i => ({ ...i, id: i.id + '-copy-' + Date.now() }))];
-  saveFoodLog(foodDate, merged);
+  await saveFoodLog(foodDate, merged);
   closeCopyDayModal();
-  renderFoodList(); updateMacroBars();
-  if (foodView === 'week') renderWeekPlanner();
+  await renderFoodList(); await updateMacroBars();
+  if (foodView === 'week') await renderWeekPlanner();
   showToast(`Copied ${source.length} items from ${fmtDate(fromDate)}`);
 }
 
-function updateMacroBars() {
-  const profile = getProfile();
-  const log = getFoodLog(foodDate);
+async function updateMacroBars() {
+  const profile = await getProfile();
+  const log = await getFoodLog(foodDate);
   const t = profile?.targets || {};
   const tot = log.reduce((a, i) => ({
     kcal: a.kcal + (i.kcal||0), protein: a.protein + (i.protein||0),
@@ -1363,8 +1436,8 @@ function selectMeal(meal) {
   document.querySelectorAll('.meal-pill').forEach(p => p.classList.toggle('active', p.dataset.meal === meal));
 }
 
-function renderFoodList() {
-  const log = getFoodLog(foodDate);
+async function renderFoodList() {
+  const log = await getFoodLog(foodDate);
   const list = document.getElementById('food-log-list');
   if (!log.length) {
     list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🍽️</div><div class="empty-state-text">Nothing logged yet.</div></div>';
@@ -1415,24 +1488,22 @@ function renderFoodList() {
   list.innerHTML = html;
 }
 
-function deleteFoodItem(i) {
-  const log = getFoodLog(foodDate);
+async function deleteFoodItem(i) {
+  const log = await getFoodLog(foodDate);
   log.splice(i, 1);
-  saveFoodLog(foodDate, log);
-  renderFoodList(); updateMacroBars();
+  await saveFoodLog(foodDate, log);
+  await renderFoodList(); await updateMacroBars();
 }
 
 // ─── Food History (learns from logged foods) ───────────────
-function getFoodHistory() {
-  try { return JSON.parse(localStorage.getItem('ft_food_db')) || []; } catch { return []; }
-}
-function saveFoodToHistory(food) {
-  let db = getFoodHistory();
+async function getFoodHistory() { return (await kvGet('food_db')) || []; }
+async function saveFoodToHistory(food) {
+  let db = await getFoodHistory();
   const existing = db.findIndex(f => f.name.toLowerCase() === food.name.toLowerCase());
   if (existing >= 0) { db[existing].uses = (db[existing].uses || 1) + 1; db[existing] = { ...db[existing], ...food }; }
   else db.unshift({ ...food, uses: 1 });
   db = db.slice(0, 200);
-  localStorage.setItem('ft_food_db', JSON.stringify(db));
+  await kvSet('food_db', db);
 }
 
 // ─── Common foods built-in (instant, no API) ───────────────
@@ -1471,18 +1542,15 @@ const COMMON_FOODS = [
 
 function debounceSearch(val) {
   clearTimeout(searchTimer);
-  const res = document.getElementById('search-results');
   if (!val.trim()) { hideSearchResults(); return; }
-  // Show instant local results immediately
-  showLocalFoodResults(val);
-  // Then fire API after debounce
+  showLocalFoodResults(val); // async, updates UI when ready
   searchTimer = setTimeout(() => searchFoodAPI(val), 600);
 }
 
-function showLocalFoodResults(query) {
+async function showLocalFoodResults(query) {
   const q = query.toLowerCase();
   const res = document.getElementById('search-results');
-  const history = getFoodHistory().filter(f => f.name.toLowerCase().includes(q)).slice(0, 5);
+  const history = (await getFoodHistory()).filter(f => f.name.toLowerCase().includes(q)).slice(0, 5);
   const common = COMMON_FOODS.filter(f => f.name.toLowerCase().includes(q) && !history.find(h => h.name.toLowerCase() === f.name.toLowerCase())).slice(0, 5);
   const all = [...history.map(f => ({ ...f, source: 'history' })), ...common.map(f => ({ ...f, source: 'common' }))];
   if (!all.length) {
@@ -1506,7 +1574,7 @@ async function searchFoodAPI(query) {
 
   // USDA — always primary (real key available)
   try {
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${getUsdaKey()}&pageSize=10&dataType=SR%20Legacy,Foundation`;
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${await getUsdaKey()}&pageSize=10&dataType=SR%20Legacy,Foundation`;
     const r = await fetch(url);
     const data = await r.json();
     if (data.foods?.length) { renderUSDAResults(data.foods, res); return; }
@@ -1583,11 +1651,11 @@ function updateGramPreview() {
 }
 document.getElementById && document.addEventListener('input', e => { if (e.target.id === 'food-grams') updateGramPreview(); });
 
-function confirmFoodAdd() {
+async function confirmFoodAdd() {
   if (!selectedFood) return;
   const g = +document.getElementById('food-grams').value || 100;
   const factor = g / 100;
-  const log = getFoodLog(foodDate);
+  const log = await getFoodLog(foodDate);
   log.push({
     id: (selectedFood.id || selectedFood.fdcId || 'custom') + '-' + Date.now(),
     name: selectedFood.name,
@@ -1600,12 +1668,11 @@ function confirmFoodAdd() {
     fibre: 0,
     time: new Date().toTimeString().slice(0,5)
   });
-  saveFoodLog(foodDate, log);
-  // Learn this food for instant future suggestions
-  saveFoodToHistory({ id: selectedFood.id || 'custom', name: selectedFood.name, kcal100: selectedFood.kcal100, p100: selectedFood.p100, c100: selectedFood.c100, f100: selectedFood.f100 });
+  await saveFoodLog(foodDate, log);
+  await saveFoodToHistory({ id: selectedFood.id || 'custom', name: selectedFood.name, kcal100: selectedFood.kcal100, p100: selectedFood.p100, c100: selectedFood.c100, f100: selectedFood.f100 });
   cancelFoodAdd();
-  renderFoodList(); updateMacroBars();
-  if (foodView === 'week') renderWeekPlanner();
+  await renderFoodList(); await updateMacroBars();
+  if (foodView === 'week') await renderWeekPlanner();
   showToast('Added to log');
 }
 
@@ -1632,10 +1699,10 @@ function showCustomFoodForm() {
   setTimeout(() => selectCustomMeal(customMeal), 0);
 }
 
-function addCustomFood() {
+async function addCustomFood() {
   const name = document.getElementById('cf-name').value.trim();
   if (!name) { alert('Please enter a name'); return; }
-  const log = getFoodLog(foodDate);
+  const log = await getFoodLog(foodDate);
   log.push({
     id: 'custom-' + Date.now(),
     name,
@@ -1647,17 +1714,17 @@ function addCustomFood() {
     fibre: 0,
     time: new Date().toTimeString().slice(0,5)
   });
-  saveFoodLog(foodDate, log);
+  await saveFoodLog(foodDate, log);
   hideCustomFoodForm();
-  renderFoodList(); updateMacroBars();
+  await renderFoodList(); await updateMacroBars();
   showToast('Added to log');
 }
 
 // ═══════════════════════════════════════════════════════════
 // WEIGHT
 // ═══════════════════════════════════════════════════════════
-function renderWeightTab() {
-  const log = getWeightLog();
+async function renderWeightTab() {
+  const log = await getWeightLog();
   const todayEntry = log.find(e => e.date === todayStr());
   if (todayEntry) document.getElementById('weight-input').value = todayEntry.weight_kg;
 
@@ -1698,23 +1765,23 @@ function renderWeightTab() {
   }).join('');
 }
 
-function logWeight() {
+async function logWeight() {
   const val = +document.getElementById('weight-input').value;
   if (!val) { alert('Enter a weight'); return; }
-  let log = getWeightLog();
+  let log = await getWeightLog();
   log = log.filter(e => e.date !== todayStr());
   log.push({ date: todayStr(), weight_kg: val });
-  saveWeightLog(log);
-  renderWeightTab();
+  await saveWeightLog(log);
+  await renderWeightTab();
   showToast('Weight saved');
 }
 
 // ═══════════════════════════════════════════════════════════
 // BODY COMPOSITION
 // ═══════════════════════════════════════════════════════════
-function renderBodyTab() {
+async function renderBodyTab() {
   document.getElementById('body-date').value = todayStr();
-  const log = getBodyLog();
+  const log = await getBodyLog();
   const latest = log[log.length - 1];
   const statsEl = document.getElementById('body-latest-stats');
   if (latest) {
@@ -1747,7 +1814,7 @@ function renderBodyTab() {
   });
 }
 
-function logBodyComp() {
+async function logBodyComp() {
   const date = document.getElementById('body-date').value || todayStr();
   const entry = {
     date,
@@ -1756,11 +1823,11 @@ function logBodyComp() {
     muscle_kg: +document.getElementById('body-muscle').value || null,
     water_pct: +document.getElementById('body-water').value || null
   };
-  let log = getBodyLog().filter(e => e.date !== date);
+  let log = (await getBodyLog()).filter(e => e.date !== date);
   log.push(entry);
   log.sort((a,b) => a.date.localeCompare(b.date));
-  saveBodyLog(log);
-  renderBodyTab();
+  await saveBodyLog(log);
+  await renderBodyTab();
   showToast('Body reading saved');
 }
 
@@ -1797,26 +1864,24 @@ const COMMON_EXERCISES = [
   'Kettlebell Swings','Box Jumps','Burpees','Jump Rope'
 ];
 
-function getExHistory() {
-  try { return JSON.parse(localStorage.getItem('ft_exercise_history')) || []; } catch { return []; }
-}
-function learnExercise(name) {
-  let h = getExHistory();
+async function getExHistory() { return (await kvGet('exercise_history')) || []; }
+async function learnExercise(name) {
+  let h = await getExHistory();
   if (!h.includes(name)) { h.unshift(name); h = h.slice(0, 50); }
   else { h = [name, ...h.filter(n => n !== name)]; }
-  localStorage.setItem('ft_exercise_history', JSON.stringify(h));
+  await kvSet('exercise_history', h);
 }
-function getAllExercises() {
-  const hist = getExHistory();
+async function getAllExercises() {
+  const hist = await getExHistory();
   const all = [...hist, ...COMMON_EXERCISES.filter(e => !hist.includes(e))];
   return [...new Set(all)];
 }
 
-function filterExSuggestions(query) {
+async function filterExSuggestions(query) {
   const box = document.getElementById('ex-suggestions');
   if (!query.trim()) { box.style.display = 'none'; return; }
   const q = query.toLowerCase();
-  const matches = getAllExercises().filter(e => e.toLowerCase().includes(q)).slice(0, 8);
+  const matches = (await getAllExercises()).filter(e => e.toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length) { box.style.display = 'none'; return; }
   box.style.display = 'block';
   box.innerHTML = matches.map(e => {
@@ -1845,11 +1910,11 @@ function closeCoach() {
   document.getElementById('coach-overlay').classList.remove('open');
 }
 
-function renderWorkoutTab() {
+async function renderWorkoutTab() {
   document.getElementById('workout-date-label').textContent = workoutDate === todayStr() ? 'Today' : fmtDate(workoutDate);
-  const wo = getWorkout(workoutDate);
+  const wo = await getWorkout(workoutDate);
   document.getElementById('workout-type').value = wo.type || '';
-  renderExerciseList(wo.exercises);
+  await renderExerciseList(wo.exercises);
 }
 
 function workoutNavDate(dir) {
@@ -1860,24 +1925,20 @@ function workoutNavDate(dir) {
 }
 
 // ─── Previous Session Lookup ──────────────────────────────
-function findPreviousSession(exerciseName) {
+async function findPreviousSession(exerciseName) {
   const name = exerciseName.toLowerCase();
-  // Search backwards through dates (last 60 days, skip current)
   const today = new Date(workoutDate + 'T00:00:00');
   for (let i = 1; i <= 60; i++) {
     const d = new Date(today); d.setDate(today.getDate() - i);
     const ds = localDateStr(d);
-    const raw = localStorage.getItem('ft_workout_' + ds);
-    if (!raw) continue;
-    try {
-      const wo = JSON.parse(raw);
-      const ex = (wo.exercises || []).find(e => e.name.toLowerCase() === name);
-      if (ex) {
-        let sets = ex.sets;
-        if (!Array.isArray(sets)) sets = Array.from({ length: +sets || 3 }, () => ({ reps: ex.reps || 0, weight_kg: ex.weight_kg || 0 }));
-        return { date: ds, sets };
-      }
-    } catch {}
+    const wo = await getWorkout(ds);
+    if (!wo.exercises?.length) continue;
+    const ex = wo.exercises.find(e => e.name.toLowerCase() === name);
+    if (ex) {
+      let sets = ex.sets;
+      if (!Array.isArray(sets)) sets = Array.from({ length: +sets || 3 }, () => ({ reps: ex.reps || 0, weight_kg: ex.weight_kg || 0 }));
+      return { date: ds, sets };
+    }
   }
   return null;
 }
@@ -1922,21 +1983,21 @@ function dismissRestTimer() {
   document.getElementById('rest-timer').style.display = 'none';
 }
 
-function renderExerciseList(exercises) {
+async function renderExerciseList(exercises) {
   const list = document.getElementById('exercise-list');
   if (!exercises.length) {
     list.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:12px 0 4px;">No exercises yet. Tap "+ Add Exercise" to start.</div>';
     return;
   }
+  const prevSessions = await Promise.all(exercises.map(ex => findPreviousSession(ex.name)));
   list.innerHTML = exercises.map((ex, ei) => {
-    // Normalise: support old flat format { sets:3, reps:10, weight_kg:40 }
     let sets = ex.sets;
     if (!Array.isArray(sets)) {
       const count = +sets || 3;
       sets = Array.from({ length: count }, () => ({ reps: ex.reps || 10, weight_kg: ex.weight_kg || 0, done: false }));
     }
     const allDone = sets.length > 0 && sets.every(s => s.done);
-    const prev = findPreviousSession(ex.name);
+    const prev = prevSessions[ei];
     let prevHtml = '';
     if (prev) {
       const prevDate = new Date(prev.date + 'T00:00:00').toLocaleDateString('en-IE', { day:'numeric', month:'short' });
@@ -1979,80 +2040,78 @@ function toggleAddExForm() {
   if (f.style.display === 'block') setTimeout(() => document.getElementById('ex-name').focus(), 50);
 }
 
-function addExercise() {
+async function addExercise() {
   const name = document.getElementById('ex-name').value.trim();
   if (!name) { alert('Enter exercise name'); return; }
   const numSets = +document.getElementById('ex-sets').value || 3;
   const defaultReps = +document.getElementById('ex-reps').value || 10;
   const defaultKg = +document.getElementById('ex-weight').value || 0;
-  const wo = getWorkout(workoutDate);
+  const wo = await getWorkout(workoutDate);
   wo.exercises.push({
     name,
     sets: Array.from({ length: numSets }, () => ({ reps: defaultReps, weight_kg: defaultKg, done: false }))
   });
   wo.type = document.getElementById('workout-type').value;
-  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
-  learnExercise(name);
+  await saveWorkoutData(workoutDate, wo);
+  await learnExercise(name);
   document.getElementById('ex-name').value = '';
   document.getElementById('ex-weight').value = '';
   document.getElementById('ex-suggestions').style.display = 'none';
   toggleAddExForm();
-  renderExerciseList(wo.exercises);
+  await renderExerciseList(wo.exercises);
 }
 
-function addSet(ei) {
-  const wo = getWorkout(workoutDate);
+async function addSet(ei) {
+  const wo = await getWorkout(workoutDate);
   const ex = wo.exercises[ei];
   if (!Array.isArray(ex.sets)) ex.sets = [];
   const last = ex.sets[ex.sets.length - 1] || { reps: 10, weight_kg: 0 };
   ex.sets.push({ reps: last.reps, weight_kg: last.weight_kg, done: false });
-  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
-  renderExerciseList(wo.exercises);
+  await saveWorkoutData(workoutDate, wo);
+  await renderExerciseList(wo.exercises);
 }
 
-function removeSet(ei, si) {
-  const wo = getWorkout(workoutDate);
+async function removeSet(ei, si) {
+  const wo = await getWorkout(workoutDate);
   const ex = wo.exercises[ei];
   if (!Array.isArray(ex.sets) || ex.sets.length <= 1) return;
   ex.sets.splice(si, 1);
-  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
-  renderExerciseList(wo.exercises);
+  await saveWorkoutData(workoutDate, wo);
+  await renderExerciseList(wo.exercises);
 }
 
-function updateSet(ei, si, field, value) {
-  const wo = getWorkout(workoutDate);
+async function updateSet(ei, si, field, value) {
+  const wo = await getWorkout(workoutDate);
   const ex = wo.exercises[ei];
   if (!Array.isArray(ex.sets)) return;
-  ex.sets[si][field] = field === 'reps' ? (+value || 0) : (+value || 0);
-  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
+  ex.sets[si][field] = +value || 0;
+  await saveWorkoutData(workoutDate, wo);
 }
 
-function toggleSetDone(ei, si, btn) {
-  const wo = getWorkout(workoutDate);
+async function toggleSetDone(ei, si, btn) {
+  const wo = await getWorkout(workoutDate);
   const ex = wo.exercises[ei];
   if (!Array.isArray(ex.sets)) return;
   ex.sets[si].done = !ex.sets[si].done;
   btn.classList.toggle('done', ex.sets[si].done);
-  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
-  // Check if all sets done — strike through exercise name
+  await saveWorkoutData(workoutDate, wo);
   const allDone = ex.sets.every(s => s.done);
   const nameEl = document.querySelector(`#exc-${ei} .ex-card-name`);
   if (nameEl) { nameEl.style.textDecoration = allDone ? 'line-through' : ''; nameEl.style.opacity = allDone ? '0.5' : '1'; }
-  // Start rest timer when marking a set done (not when unmarking)
   if (ex.sets[si].done && !allDone) startRestTimer(restTimerDefault);
 }
 
-function removeExercise(i) {
-  const wo = getWorkout(workoutDate);
+async function removeExercise(i) {
+  const wo = await getWorkout(workoutDate);
   wo.exercises.splice(i, 1);
-  localStorage.setItem('ft_workout_' + workoutDate, JSON.stringify(wo));
-  renderExerciseList(wo.exercises);
+  await saveWorkoutData(workoutDate, wo);
+  await renderExerciseList(wo.exercises);
 }
 
-function clearWorkout() {
+async function clearWorkout() {
   if (!confirm('Clear all exercises for this day?')) return;
-  localStorage.removeItem('ft_workout_' + workoutDate);
-  renderWorkoutTab();
+  await idbDelete('workouts', workoutDate);
+  await renderWorkoutTab();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2073,13 +2132,13 @@ async function sendChat() {
   history.appendChild(thinking);
   history.scrollTop = history.scrollHeight;
 
-  const profile = getProfile();
-  const wo = getWorkout(workoutDate);
+  const profile = await getProfile();
+  const wo = await getWorkout(workoutDate);
   const systemPrompt = `You are a concise, practical fitness coach. The user is ${profile?.name || 'the user'}, goal: ${profile?.goal || 'fitness'}, current weight: ${profile?.weight_kg || '?'}kg. Today's session: ${wo.type || 'General'}. Give specific, actionable advice in 2-3 sentences. No fluff.`;
 
   try {
-    const openaiKey = getOpenAIKey();
-    const anthropicKey = getAnthropicKey();
+    const openaiKey = await getOpenAIKey();
+    const anthropicKey = await getAnthropicKey();
     if (!openaiKey && !anthropicKey) {
       thinking.classList.remove('chat-thinking');
       thinking.textContent = 'Add an OpenAI or Anthropic API key in ⚙️ Settings to use the AI coach.';
@@ -2212,7 +2271,6 @@ async function deletePhoto(id) {
 // ═══════════════════════════════════════════════════════════
 function initApp() {
   renderDashboard();
-  openPhotoDB(); // warm up
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2228,11 +2286,9 @@ function hashPin(pin) {
   return h.toString(36);
 }
 
-function getStoredPin() { return localStorage.getItem('ft_pin') || null; }
-
-function checkPinOnLoad() {
-  const stored = getStoredPin();
-  if (!stored) return false; // no PIN set — proceed
+async function checkPinOnLoad() {
+  const stored = await kvGet('pin');
+  if (!stored) return false;
   showPinScreen('unlock');
   return true;
 }
@@ -2263,17 +2319,16 @@ function pinBackspace() {
   updatePinDots();
 }
 
-function submitPin() {
+async function submitPin() {
   if (pinMode === 'unlock') {
-    if (hashPin(pinBuffer) === getStoredPin()) {
+    const stored = await kvGet('pin');
+    if (hashPin(pinBuffer) === stored) {
       document.getElementById('pin-screen').style.display = 'none';
       initApp();
     } else {
       document.getElementById('pin-error').textContent = 'Incorrect PIN. Try again.';
       pinBuffer = '';
       updatePinDots();
-      document.getElementById('pin-screen').style.display = 'flex'; // shake effect
-      document.getElementById('pin-dots').style.animation = 'none';
     }
   }
 }
@@ -2281,13 +2336,12 @@ function submitPin() {
 // ═══════════════════════════════════════════════════════════
 // SETTINGS
 // ═══════════════════════════════════════════════════════════
-function openSettings() {
-  const s = getSettings();
+async function openSettings() {
+  const s = await getSettings();
   document.getElementById('s-openai').value = s.openai_key || '';
   document.getElementById('s-anthropic').value = s.anthropic_key || '';
   document.getElementById('s-usda').value = s.usda_key || '';
-  // PIN state
-  const hasPIN = !!getStoredPin();
+  const hasPIN = !!(await kvGet('pin'));
   document.getElementById('pin-setup-label').textContent = hasPIN ? 'Change PIN (enter new 4-digit PIN)' : 'Set a 4-digit PIN to protect your data';
   document.getElementById('s-pin-remove-btn').style.display = hasPIN ? 'inline-block' : 'none';
   document.getElementById('s-pin').value = '';
@@ -2297,60 +2351,58 @@ function openSettings() {
 function closeSettings() {
   document.getElementById('settings-modal').style.display = 'none';
 }
-function saveSettings() {
+async function saveSettings() {
   const s = {
     openai_key: document.getElementById('s-openai').value.trim(),
     anthropic_key: document.getElementById('s-anthropic').value.trim(),
     usda_key: document.getElementById('s-usda').value.trim() || 'DEMO_KEY'
   };
-  localStorage.setItem('ft_settings', JSON.stringify(s));
+  await kvSet('settings', s);
   closeSettings();
   showToast('Keys saved ✓');
 }
-function savePIN() {
+async function savePIN() {
   const pin = document.getElementById('s-pin').value.trim();
   const confirm = document.getElementById('s-pin-confirm').value.trim();
   if (!/^\d{4}$/.test(pin)) { showToast('PIN must be exactly 4 digits'); return; }
   if (pin !== confirm) { showToast('PINs don\'t match'); return; }
-  localStorage.setItem('ft_pin', hashPin(pin));
+  await kvSet('pin', hashPin(pin));
   showToast('PIN saved ✓');
   document.getElementById('s-pin').value = '';
   document.getElementById('s-pin-confirm').value = '';
   document.getElementById('s-pin-remove-btn').style.display = 'inline-block';
   document.getElementById('pin-setup-label').textContent = 'Change PIN (enter new 4-digit PIN)';
 }
-function removePIN() {
+async function removePIN() {
   if (!confirm('Remove PIN protection?')) return;
-  localStorage.removeItem('ft_pin');
+  await kvDel('pin');
   showToast('PIN removed');
   document.getElementById('s-pin-remove-btn').style.display = 'none';
   document.getElementById('pin-setup-label').textContent = 'Set a 4-digit PIN to protect your data';
 }
-function resetProfile() {
+async function resetProfile() {
   if (!confirm('Reset profile and start onboarding again? Your food/workout logs will be kept.')) return;
-  localStorage.removeItem('ft_profile');
+  await kvDel('profile');
   location.reload();
 }
 
 // ═══════════════════════════════════════════════════════════
 // DATA EXPORT / IMPORT
 // ═══════════════════════════════════════════════════════════
-function exportData() {
+async function exportData() {
   const data = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && (key.startsWith('ft_'))) {
-      try { data[key] = JSON.parse(localStorage.getItem(key)); }
-      catch { data[key] = localStorage.getItem(key); }
-    }
-  }
-  const profile = getProfile();
+  const kvAll = await idbGetAll('kv');
+  kvAll.forEach(({ k, v }) => { if (k !== '_migrated') data['ft_' + k] = v; });
+  const foodAll = await idbGetAll('food_log');
+  foodAll.forEach(r => { data['ft_food_' + r.date] = r.items; });
+  const woAll = await idbGetAll('workouts');
+  woAll.forEach(({ date, ...wo }) => { data['ft_workout_' + date] = wo; });
+  const profile = await getProfile();
   const name = (profile?.name || 'fittrack').toLowerCase().replace(/\s+/g, '-');
-  const date = todayStr();
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `fittrack-${name}-${date}.json`;
+  a.download = `fittrack-${name}-${todayStr()}.json`;
   a.click();
   showToast('Data exported ✓');
 }
@@ -2449,7 +2501,7 @@ function parseHealthAutoExport(raw) {
   return result;
 }
 
-function applyHealthImport(result) {
+async function applyHealthImport(result) {
   const statusEl = document.getElementById('health-sync-status');
   let counts = { weight: 0, body: 0, updated: 0 };
 
@@ -2472,7 +2524,7 @@ function applyHealthImport(result) {
 
   // Weight log — upsert (add new, update existing)
   if (result.weight.length) {
-    let wLog = getWeightLog();
+    let wLog = await getWeightLog();
     const existingMap = Object.fromEntries(wLog.map((e, i) => [e.date, i]));
     result.weight.forEach(e => {
       const idx = existingMap[e.date];
@@ -2480,12 +2532,12 @@ function applyHealthImport(result) {
       else { wLog.push({ date: e.date, weight_kg: e.value }); counts.weight++; }
     });
     wLog.sort((a, b) => a.date.localeCompare(b.date));
-    saveWeightLog(wLog);
+    await saveWeightLog(wLog);
   }
 
   // Body composition — upsert
   if (result.bodyFat.length || result.muscle.length) {
-    let bLog = getBodyLog();
+    let bLog = await getBodyLog();
     const allDates = new Set([...result.bodyFat.map(e => e.date), ...result.muscle.map(e => e.date)]);
     const fatMap = Object.fromEntries(result.bodyFat.map(e => [e.date, e.value]));
     const muscleMap = Object.fromEntries(result.muscle.map(e => [e.date, e.value]));
@@ -2505,12 +2557,12 @@ function applyHealthImport(result) {
       else { bLog.push(entry); counts.body++; }
     });
     bLog.sort((a, b) => a.date.localeCompare(b.date));
-    saveBodyLog(bLog);
+    await saveBodyLog(bLog);
   }
 
   // Activity data (steps, active calories, heart rate)
   if (result.steps.length || result.activeCalories.length || result.heartRate.length) {
-    let actLog = getActivityLog();
+    let actLog = await getActivityLog();
     const allDates = new Set([
       ...result.steps.map(e => e.date),
       ...result.activeCalories.map(e => e.date),
@@ -2533,7 +2585,7 @@ function applyHealthImport(result) {
       else { actLog.push(entry); counts.activity = (counts.activity || 0) + 1; }
     });
     actLog.sort((a, b) => a.date.localeCompare(b.date));
-    saveActivityLog(actLog);
+    await saveActivityLog(actLog);
   }
 
   const total = counts.weight + counts.body + (counts.activity || 0);
@@ -2560,16 +2612,30 @@ function importData(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const data = JSON.parse(e.target.result);
       let count = 0;
-      Object.entries(data).forEach(([key, value]) => {
-        if (key.startsWith('ft_')) {
-          localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
-          count++;
+      for (const [key, value] of Object.entries(data)) {
+        if (!key.startsWith('ft_')) continue;
+        const sub = key.slice(3);
+        if      (sub === 'profile')           await kvSet('profile', value);
+        else if (sub === 'settings')          await kvSet('settings', value);
+        else if (sub === 'pin')               await kvSet('pin', value);
+        else if (sub === 'weight_log')        await kvSet('weight_log', value);
+        else if (sub === 'body_log')          await kvSet('body_log', value);
+        else if (sub === 'activity_log')      await kvSet('activity_log', value);
+        else if (sub === 'food_db')           await kvSet('food_db', value);
+        else if (sub === 'exercise_history')  await kvSet('exercise_history', value);
+        else if (key.startsWith('ft_food_')) {
+          const date = key.slice(8);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(date)) await idbPut('food_log', { date, items: value || [] });
+        } else if (key.startsWith('ft_workout_')) {
+          const date = key.slice(11);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(date)) await idbPut('workouts', { date, ...(value || {}) });
         }
-      });
+        count++;
+      }
       showToast(`Imported ${count} records ✓`);
       setTimeout(() => location.reload(), 1200);
     } catch {
@@ -2582,13 +2648,16 @@ function importData(input) {
 
 // Bootstrap
 renderObDots();
-const profile = getProfile();
-if (profile) {
-  document.getElementById('onboarding').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
-  // Check PIN before showing app
-  if (!checkPinOnLoad()) initApp();
-}
+(async () => {
+  await openDB();
+  await migrateFromLocalStorage();
+  const profile = await getProfile();
+  if (profile) {
+    document.getElementById('onboarding').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    if (!await checkPinOnLoad()) initApp();
+  }
+})();
 
 // PWA Service Worker — unregister old versions during active development
 if ('serviceWorker' in navigator) {
